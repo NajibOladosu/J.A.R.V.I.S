@@ -17,7 +17,6 @@ class WorkingJarvisRenderer {
             
             this.setupWindowControls();
             this.setupChatInterface();
-            this.setupSidePanelTabs();
             this.setupSettingsModal();
             this.setupBackendListeners();
             this.hideLoadingOverlay();
@@ -137,15 +136,6 @@ class WorkingJarvisRenderer {
         });
     }
 
-    setupSidePanelTabs() {
-        // Setup tab buttons
-        const tabButtons = document.querySelectorAll('.tab-btn');
-        tabButtons.forEach(btn => {
-            btn.addEventListener('click', () => {
-                this.switchTab(btn.dataset.tab);
-            });
-        });
-    }
 
     setupSettingsModal() {
         const settingsBtn = document.getElementById('settingsBtn');
@@ -446,27 +436,6 @@ class WorkingJarvisRenderer {
         }
     }
 
-    // Tab switching functionality
-    switchTab(tabName) {
-        // Update tab buttons
-        const tabButtons = document.querySelectorAll('.tab-btn');
-        tabButtons.forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.tab === tabName);
-        });
-
-        // Update tab panels
-        const tabPanels = document.querySelectorAll('.tab-panel');
-        tabPanels.forEach(panel => {
-            panel.classList.toggle('active', panel.id === `${tabName}Panel`);
-        });
-
-        // Load specific content based on tab
-        if (tabName === 'history') {
-            this.loadHistoryPanel();
-        } else if (tabName === 'system') {
-            this.loadSystemPanel();
-        }
-    }
 
     // Settings modal functions
     showSettingsModal() {
@@ -664,109 +633,7 @@ class WorkingJarvisRenderer {
         }
     }
 
-    // History panel functionality
-    loadHistoryPanel() {
-        const historyList = document.getElementById('historyList');
-        if (!historyList) return;
 
-        try {
-            const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-            
-            if (history.length === 0) {
-                historyList.innerHTML = '<div class="empty-state">No conversation history yet.</div>';
-                return;
-            }
-
-            historyList.innerHTML = history.slice(0, 10).map((item, index) => `
-                <div class="history-item" onclick="window.jarvisRenderer.loadHistoryItem(${index})">
-                    <div class="history-preview">${item.userMessage || 'Conversation'}</div>
-                    <div class="history-time">${new Date(item.timestamp).toLocaleDateString()}</div>
-                </div>
-            `).join('');
-        } catch (error) {
-            console.error('Error loading history:', error);
-            historyList.innerHTML = '<div class="error-state">Error loading history.</div>';
-        }
-    }
-
-    loadHistoryItem(index) {
-        try {
-            const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-            const item = history[index];
-            if (item) {
-                this.addMessage(item.userMessage, 'user');
-                this.addMessage(item.aiResponse, 'ai');
-            }
-        } catch (error) {
-            console.error('Error loading history item:', error);
-        }
-    }
-
-    // System panel functionality
-    async loadSystemPanel() {
-        const systemInfo = document.getElementById('systemInfo');
-        if (!systemInfo) return;
-
-        try {
-            // Update backend status
-            await this.checkBackendStatus();
-
-            // Add system metrics
-            const systemMetrics = `
-                <div class="system-item">
-                    <span class="system-label">Backend Status:</span>
-                    <span class="system-value" id="backendStatus">${this.backendConnected ? 'Connected' : 'Disconnected'}</span>
-                </div>
-                <div class="system-item">
-                    <span class="system-label">Voice Status:</span>
-                    <span class="system-value" id="voiceStatus">${localStorage.getItem('jarvis-voice-enabled') !== 'false' ? 'Enabled' : 'Disabled'}</span>
-                </div>
-                <div class="system-item">
-                    <span class="system-label">Theme:</span>
-                    <span class="system-value">${document.documentElement.getAttribute('data-theme') || 'light'}</span>
-                </div>
-                <div class="system-item">
-                    <span class="system-label">Messages Sent:</span>
-                    <span class="system-value">${this.messageHistory.length}</span>
-                </div>
-                <div class="system-actions">
-                    <button class="btn secondary" onclick="window.jarvisRenderer.clearHistory()">Clear History</button>
-                    <button class="btn secondary" onclick="window.jarvisRenderer.exportHistory()">Export History</button>
-                </div>
-            `;
-            
-            systemInfo.innerHTML = systemMetrics;
-        } catch (error) {
-            console.error('Error loading system panel:', error);
-        }
-    }
-
-    clearHistory() {
-        if (confirm('Are you sure you want to clear all chat history?')) {
-            localStorage.removeItem('chatHistory');
-            this.messageHistory = [];
-            this.addMessage('Chat history cleared successfully!', 'ai');
-            this.loadHistoryPanel();
-        }
-    }
-
-    exportHistory() {
-        try {
-            const history = JSON.parse(localStorage.getItem('chatHistory') || '[]');
-            const dataStr = JSON.stringify(history, null, 2);
-            const dataBlob = new Blob([dataStr], { type: 'application/json' });
-            
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(dataBlob);
-            link.download = `jarvis-history-${new Date().toISOString().split('T')[0]}.json`;
-            link.click();
-            
-            this.addMessage('Chat history exported successfully!', 'ai');
-        } catch (error) {
-            console.error('Error exporting history:', error);
-            this.addMessage('Failed to export chat history.', 'ai');
-        }
-    }
 }
 
 // Initialize when DOM is loaded
