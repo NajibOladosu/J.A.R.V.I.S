@@ -9,6 +9,7 @@ const fs = require('fs');
 const store = new Store();
 
 let mainWindow = null;
+let settingsWindow = null;
 let pythonProcess = null;
 let ws = null;
 let isQuitting = false;
@@ -82,6 +83,62 @@ function createMainWindow() {
     setupMenu();
 }
 
+function createSettingsWindow() {
+    // Don't create multiple settings windows
+    if (settingsWindow) {
+        settingsWindow.focus();
+        return;
+    }
+
+    console.log('Creating settings window...');
+    
+    settingsWindow = new BrowserWindow({
+        width: 600,
+        height: 700,
+        minWidth: 500,
+        minHeight: 600,
+        resizable: true,
+        minimizable: true,
+        maximizable: false,
+        frame: process.platform !== 'darwin',
+        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        backgroundColor: '#0a0a0a',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+            enableRemoteModule: true
+        },
+        show: false,
+        parent: mainWindow,
+        modal: false
+    });
+
+    const settingsHtmlPath = path.join(__dirname, 'settings.html');
+    console.log('Loading settings HTML from:', settingsHtmlPath);
+    settingsWindow.loadFile(settingsHtmlPath);
+
+    // Handle window events
+    settingsWindow.once('ready-to-show', () => {
+        console.log('Settings window ready to show');
+        settingsWindow.show();
+        
+        // Open DevTools in development
+        if (process.argv.includes('--dev')) {
+            settingsWindow.webContents.openDevTools();
+        }
+    });
+
+    settingsWindow.on('close', () => {
+        console.log('Settings window closed');
+        settingsWindow = null;
+    });
+
+    settingsWindow.on('closed', () => {
+        console.log('Settings window destroyed');
+        settingsWindow = null;
+    });
+}
+
 function setupMenu() {
     const template = [
         {
@@ -135,6 +192,18 @@ function setupIPC() {
     ipcMain.handle('window-close', () => {
         if (mainWindow) mainWindow.hide();
     });
+
+    // Settings window
+    ipcMain.handle('open-settings', () => {
+        createSettingsWindow();
+    });
+
+    ipcMain.handle('close-settings', () => {
+        if (settingsWindow) {
+            settingsWindow.close();
+        }
+    });
+
 
     // Settings
     ipcMain.handle('get-settings', () => {
