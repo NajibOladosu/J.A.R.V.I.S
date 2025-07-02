@@ -17,7 +17,7 @@ A futuristic cross-platform AI assistant built with ElectronJS and GPT4All, feat
 ### ⏰ Task Management
 - Set reminders and alarms with custom messages
 - Background alarm monitoring
-- Persistent alarm storage and management
+- Persistent alarm storage and managementÍ
 
 ### 🖥️ System Integration
 - System information monitoring (CPU, memory, disk usage)
