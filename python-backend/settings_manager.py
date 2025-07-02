@@ -9,7 +9,6 @@ class SettingsManager:
         self.settings_file = Path(__file__).parent / settings_file
         self.default_settings = {
             "ai_model": "orca-mini-3b-gguf2-q4_0.gguf",
-            "mock_mode": False,
             "voice_enabled": True,
             "backend_port": 8000,
             "theme": "dark",
@@ -75,7 +74,6 @@ class SettingsManager:
             # Map frontend keys to backend keys
             key_mapping = {
                 'jarvis-ai-model': 'ai_model',
-                'jarvis-mock-mode': 'mock_mode',
                 'jarvis-voice-enabled': 'voice_enabled',
                 'jarvis-backend-port': 'backend_port',
                 'jarvis-theme': 'theme',
@@ -88,7 +86,7 @@ class SettingsManager:
                     value = frontend_settings[frontend_key]
                     
                     # Convert string values to appropriate types
-                    if backend_key == 'mock_mode' or backend_key == 'voice_enabled' or backend_key == 'auto_start':
+                    if backend_key == 'voice_enabled' or backend_key == 'auto_start':
                         value = str(value).lower() == 'true'
                     elif backend_key == 'backend_port':
                         value = int(value)
@@ -109,9 +107,6 @@ class SettingsManager:
         """Get the currently selected AI model"""
         return self.get('ai_model', 'orca-mini-3b-gguf2-q4_0.gguf')
     
-    def is_mock_mode(self) -> bool:
-        """Check if mock mode is enabled"""
-        return self.get('mock_mode', False) or os.getenv("JARVIS_USE_MOCK", "false").lower() == "true"
     
     def get_backend_port(self) -> int:
         """Get the backend port"""
