@@ -173,64 +173,6 @@ function setupMenu() {
     Menu.setApplicationMenu(menu);
 }
 
-function setupIPC() {
-    // Window controls
-    ipcMain.handle('window-minimize', () => {
-        if (mainWindow) mainWindow.minimize();
-    });
-
-    ipcMain.handle('window-maximize', () => {
-        if (mainWindow) {
-            if (mainWindow.isMaximized()) {
-                mainWindow.unmaximize();
-            } else {
-                mainWindow.maximize();
-            }
-        }
-    });
-
-    ipcMain.handle('window-close', () => {
-        if (mainWindow) mainWindow.hide();
-    });
-
-    // Settings window
-    ipcMain.handle('open-settings', () => {
-        createSettingsWindow();
-    });
-
-    ipcMain.handle('close-settings', () => {
-        if (settingsWindow) {
-            settingsWindow.close();
-        }
-    });
-
-
-    // Settings
-    ipcMain.handle('get-settings', () => {
-        return settings;
-    });
-
-    ipcMain.handle('save-settings', (event, newSettings) => {
-        Object.assign(settings, newSettings);
-        Object.keys(newSettings).forEach(key => {
-            store.set(key, newSettings[key]);
-        });
-        return settings;
-    });
-
-    // Communication with Python backend
-    ipcMain.handle('send-message', async (event, message) => {
-        return await sendToPython(message);
-    });
-
-    ipcMain.handle('get-backend-status', () => {
-        return {
-            connected: ws && ws.readyState === WebSocket.OPEN,
-            pythonRunning: pythonProcess && !pythonProcess.killed,
-            port: currentPort
-        };
-    });
-}
 
 async function startPythonBackend() {
     try {
@@ -472,6 +414,30 @@ function setupIPC() {
     ipcMain.handle('window-close', (event) => {
         const window = BrowserWindow.fromWebContents(event.sender);
         window?.close();
+    });
+
+    // Settings window
+    ipcMain.handle('open-settings', () => {
+        createSettingsWindow();
+    });
+
+    ipcMain.handle('close-settings', () => {
+        if (settingsWindow) {
+            settingsWindow.close();
+        }
+    });
+
+    // Settings
+    ipcMain.handle('get-settings', () => {
+        return settings;
+    });
+
+    ipcMain.handle('save-settings', (event, newSettings) => {
+        Object.assign(settings, newSettings);
+        Object.keys(newSettings).forEach(key => {
+            store.set(key, newSettings[key]);
+        });
+        return settings;
     });
 }
 
