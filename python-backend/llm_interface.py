@@ -242,3 +242,113 @@ JARVIS:"""
                 "action": None,
                 "params": {}
             }
+
+    # Model Management Methods
+    def is_model_available(self, model_name: str) -> bool:
+        """Check if a model is available locally"""
+        try:
+            from gpt4all.gpt4all import DEFAULT_MODEL_DIRECTORY
+            import glob
+            
+            model_dir = DEFAULT_MODEL_DIRECTORY
+            if not os.path.exists(model_dir):
+                return False
+            
+            # Check for exact filename
+            if os.path.exists(os.path.join(model_dir, model_name)):
+                return True
+            
+            # Check for variations with common extensions
+            for ext in ['', '.bin', '.gguf', '.q4_0.bin', '.q4_0.gguf']:
+                if os.path.exists(os.path.join(model_dir, model_name + ext)):
+                    return True
+                
+                # Also check without the extension if provided
+                name_without_ext = model_name.rsplit('.', 1)[0] if '.' in model_name else model_name
+                if os.path.exists(os.path.join(model_dir, name_without_ext + ext)):
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error checking model availability: {e}")
+            return False
+
+    async def download_model(self, model_name: str) -> bool:
+        """Download a model if not available locally"""
+        try:
+            if self.is_model_available(model_name):
+                logging.info(f"Model {model_name} is already available")
+                return True
+            
+            logging.info(f"Starting download of model: {model_name}")
+            
+            # Reset download progress
+            self._download_progress = 0
+            
+            def download_with_progress():
+                try:
+                    # Create a temporary GPT4All instance to trigger download
+                    temp_model = GPT4All(model_name, allow_download=True)
+                    self._download_progress = 100
+                    return True
+                except Exception as e:
+                    logging.error(f"Download failed: {e}")
+                    return False
+            
+            # Run download in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(None, download_with_progress)
+            
+            return success
+            
+        except Exception as e:
+            logging.error(f"Error downloading model: {e}")
+            return False
+
+    def get_download_progress(self) -> float:
+        """Get current download progress (0-100)"""
+        return getattr(self, '_download_progress', 0)
+
+    async def switch_model(self, model_name: str) -> bool:
+        """Switch to a different model"""
+        try:
+            if not self.is_model_available(model_name):
+                logging.error(f"Model {model_name} is not available locally")
+                return False
+            
+            if self.model_name == model_name and self.model_initialized:
+                logging.info(f"Already using model {model_name}")
+                return True
+            
+            logging.info(f"Switching from {self.model_name} to {model_name}")
+            
+            # Close current model if loaded
+            if self.model:
+                try:
+                    # GPT4All doesn't have an explicit close method, but we can dereference
+                    self.model = None
+                except Exception as e:
+                    logging.warning(f"Error closing previous model: {e}")
+            
+            # Update model name and reset initialization
+            self.model_name = model_name
+            self.model_initialized = False
+            
+            # Initialize new model
+            await self.initialize()
+            
+            if self.model_initialized:
+                logging.info(f"Successfully switched to model: {model_name}")
+                return True
+            else:
+                logging.error(f"Failed to initialize new model: {model_name}")
+                return False
+                
+        except Exception as e:
+            logging.error(f"Error switching model: {e}")
+            return False
+
+    def get_current_model(self) -> str:
+        """Get the name of the currently loaded model"""
+        return self.model_name or "No model loaded"

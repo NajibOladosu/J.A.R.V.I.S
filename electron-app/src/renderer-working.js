@@ -186,6 +186,14 @@ class WorkingJarvisRenderer {
 
         // Load initial settings
         this.loadSettings();
+
+        // Add model selection change listener
+        const modelSelect = document.getElementById('modelSelect');
+        if (modelSelect) {
+            modelSelect.addEventListener('change', () => {
+                this.checkModelAvailability(modelSelect.value);
+            });
+        }
     }
 
     setupBackendListeners() {
@@ -437,6 +445,137 @@ class WorkingJarvisRenderer {
     }
 
 
+    // Model management functions
+    async checkModelAvailability(modelName) {
+        const statusEl = document.getElementById('modelStatus');
+        const statusTextEl = document.getElementById('modelStatusText');
+        
+        if (!statusEl || !statusTextEl) return;
+
+        statusEl.style.display = 'block';
+        statusTextEl.textContent = 'Checking model availability...';
+
+        try {
+            const response = await this.sendBackendRequest('/model/check', {
+                method: 'POST',
+                data: { model_name: modelName }
+            });
+
+            if (response && response.success) {
+                if (response.available) {
+                    statusTextEl.textContent = 'Model is available and ready to use';
+                    statusTextEl.style.color = 'var(--accent-success)';
+                } else {
+                    statusTextEl.textContent = 'Model not found - will be downloaded when applied';
+                    statusTextEl.style.color = 'var(--accent-warning)';
+                }
+            } else {
+                statusTextEl.textContent = 'Unable to check model status';
+                statusTextEl.style.color = 'var(--accent-error)';
+            }
+        } catch (error) {
+            console.error('Error checking model availability:', error);
+            statusTextEl.textContent = 'Error checking model status';
+            statusTextEl.style.color = 'var(--accent-error)';
+        }
+    }
+
+    async downloadAndSwitchModel(modelName) {
+        const statusEl = document.getElementById('modelStatus');
+        const statusTextEl = document.getElementById('modelStatusText');
+        const progressEl = document.getElementById('downloadProgress');
+        const progressFillEl = document.getElementById('progressFill');
+        const progressTextEl = document.getElementById('progressText');
+
+        if (!statusEl || !statusTextEl || !progressEl) return false;
+
+        statusEl.style.display = 'block';
+        progressEl.style.display = 'block';
+        statusTextEl.textContent = 'Downloading model...';
+        statusTextEl.style.color = 'var(--accent-primary)';
+
+        try {
+            // Start model download
+            const downloadResponse = await this.sendBackendRequest('/model/download', {
+                method: 'POST',
+                data: { model_name: modelName }
+            });
+
+            if (!downloadResponse || !downloadResponse.success) {
+                throw new Error(downloadResponse?.error || 'Failed to start download');
+            }
+
+            // Poll for download progress
+            const pollInterval = setInterval(async () => {
+                try {
+                    const progressResponse = await this.sendBackendRequest('/model/progress', {
+                        method: 'GET'
+                    });
+
+                    if (progressResponse && progressResponse.success) {
+                        const progress = progressResponse.progress || 0;
+                        progressFillEl.style.width = `${progress}%`;
+                        progressTextEl.textContent = `${Math.round(progress)}%`;
+
+                        if (progress >= 100) {
+                            clearInterval(pollInterval);
+                            
+                            // Switch to the new model
+                            statusTextEl.textContent = 'Loading new model...';
+                            const switchResponse = await this.sendBackendRequest('/model/switch', {
+                                method: 'POST',
+                                data: { model_name: modelName }
+                            });
+
+                            if (switchResponse && switchResponse.success) {
+                                statusTextEl.textContent = 'Model loaded successfully!';
+                                statusTextEl.style.color = 'var(--accent-success)';
+                                this.addMessage(`Successfully switched to ${modelName}. The new AI model is ready to use!`, 'ai');
+                                
+                                // Hide progress after success
+                                setTimeout(() => {
+                                    progressEl.style.display = 'none';
+                                    statusEl.style.display = 'none';
+                                }, 3000);
+                                
+                                return true;
+                            } else {
+                                throw new Error('Failed to switch model');
+                            }
+                        }
+                    }
+                } catch (error) {
+                    clearInterval(pollInterval);
+                    throw error;
+                }
+            }, 1000);
+
+            return true;
+
+        } catch (error) {
+            console.error('Error downloading/switching model:', error);
+            statusTextEl.textContent = 'Error downloading model: ' + error.message;
+            statusTextEl.style.color = 'var(--accent-error)';
+            progressEl.style.display = 'none';
+            this.addMessage(`Failed to switch to ${modelName}: ${error.message}`, 'ai');
+            return false;
+        }
+    }
+
+    async sendBackendRequest(url, options = {}) {
+        try {
+            const response = await ipcRenderer.invoke('send-backend-request', {
+                url: url,
+                method: options.method || 'GET',
+                data: options.data
+            });
+            return response;
+        } catch (error) {
+            console.error('Backend request error:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     // Settings modal functions
     showSettingsModal() {
         const modal = document.getElementById('settingsModal');
@@ -487,6 +626,8 @@ class WorkingJarvisRenderer {
         const modelSelect = document.getElementById('modelSelect');
         if (modelSelect) {
             modelSelect.value = selectedModel;
+            // Check current model availability
+            this.checkModelAvailability(selectedModel);
         }
 
     }
@@ -563,13 +704,18 @@ class WorkingJarvisRenderer {
             const pythonPortInput = document.getElementById('pythonPortInput');
             const modelSelect = document.getElementById('modelSelect');
 
+            // Check if model has changed
+            const previousModel = localStorage.getItem('jarvis-ai-model') || 'orca-mini-3b-gguf2-q4_0.gguf';
+            const selectedModel = modelSelect?.value || 'orca-mini-3b-gguf2-q4_0.gguf';
+            const modelChanged = previousModel !== selectedModel;
+
             // Create settings object for frontend storage
             const frontendSettings = {
                 'jarvis-theme': themeSelect?.value || 'light',
                 'jarvis-voice-enabled': voiceEnabledCheck?.checked !== false,
                 'jarvis-auto-start': autoStartCheck?.checked === true,
                 'jarvis-backend-port': pythonPortInput?.value || '8000',
-                'jarvis-ai-model': modelSelect?.value || 'orca-mini-3b-gguf2-q4_0.gguf',
+                'jarvis-ai-model': selectedModel,
             };
 
             // Save to localStorage
@@ -582,30 +728,78 @@ class WorkingJarvisRenderer {
                 this.setTheme(themeSelect.value);
             }
 
-            // Send settings to backend if connected
-            if (this.backendConnected) {
+            // Handle model changes if backend is connected
+            if (this.backendConnected && modelChanged) {
                 try {
-                    const response = await this.sendSettingsToBackend(frontendSettings);
-                    if (response && response.success) {
-                        if (closeModal) this.hideSettingsModal();
-                        this.addMessage('Settings applied successfully! AI model changes will take effect immediately.', 'ai');
+                    // Don't close modal yet if we're switching models
+                    this.addMessage('Checking model availability and switching if needed...', 'ai');
+                    
+                    // Check if model is available
+                    const checkResponse = await this.sendBackendRequest('/model/check', {
+                        method: 'POST',
+                        data: { model_name: selectedModel }
+                    });
+
+                    if (checkResponse && checkResponse.success) {
+                        if (checkResponse.available) {
+                            // Model is available, switch directly
+                            const switchResponse = await this.sendBackendRequest('/model/switch', {
+                                method: 'POST',
+                                data: { model_name: selectedModel }
+                            });
+
+                            if (switchResponse && switchResponse.success) {
+                                this.addMessage(`Successfully switched to ${selectedModel}!`, 'ai');
+                                if (closeModal) this.hideSettingsModal();
+                            } else {
+                                throw new Error('Failed to switch model');
+                            }
+                        } else {
+                            // Model needs to be downloaded
+                            this.addMessage(`Model ${selectedModel} not found locally. Starting download...`, 'ai');
+                            const downloadSuccess = await this.downloadAndSwitchModel(selectedModel);
+                            
+                            if (downloadSuccess && closeModal) {
+                                // Modal will be closed by downloadAndSwitchModel after successful completion
+                                setTimeout(() => this.hideSettingsModal(), 3000);
+                            }
+                        }
                     } else {
-                        if (closeModal) this.hideSettingsModal();
-                        this.addMessage('Settings saved to frontend, but could not sync with backend. Changes will apply on restart.', 'ai');
+                        throw new Error('Unable to check model availability');
                     }
+
                 } catch (error) {
-                    console.error('Error sending settings to backend:', error);
+                    console.error('Error handling model change:', error);
+                    this.addMessage(`Model switching failed: ${error.message}. Other settings have been applied.`, 'ai');
                     if (closeModal) this.hideSettingsModal();
-                    this.addMessage('Settings saved locally. Restart application for full effect.', 'ai');
                 }
             } else {
-                if (closeModal) this.hideSettingsModal();
-                this.addMessage('Settings saved! Backend not connected - changes will apply when backend starts.', 'ai');
+                // Send other settings to backend
+                if (this.backendConnected) {
+                    try {
+                        const response = await this.sendSettingsToBackend(frontendSettings);
+                        if (response && response.success) {
+                            if (closeModal) this.hideSettingsModal();
+                            this.addMessage('Settings applied successfully!', 'ai');
+                        } else {
+                            if (closeModal) this.hideSettingsModal();
+                            this.addMessage('Settings saved to frontend, but could not sync with backend.', 'ai');
+                        }
+                    } catch (error) {
+                        console.error('Error sending settings to backend:', error);
+                        if (closeModal) this.hideSettingsModal();
+                        this.addMessage('Settings saved locally. Some features may require restart.', 'ai');
+                    }
+                } else {
+                    if (closeModal) this.hideSettingsModal();
+                    this.addMessage('Settings saved! Backend not connected - changes will apply when backend starts.', 'ai');
+                }
             }
 
         } catch (error) {
             console.error('Error saving settings:', error);
             this.addMessage('Error saving settings. Please try again.', 'ai');
+            if (closeModal) this.hideSettingsModal();
         }
     }
 

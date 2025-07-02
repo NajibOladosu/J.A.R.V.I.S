@@ -4,7 +4,7 @@ import logging
 import sys
 import socket
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -73,6 +73,13 @@ class ChatRequest(BaseModel):
 class ActionRequest(BaseModel):
     action: str
     params: Dict[str, Any] = {}
+
+class ModelRequest(BaseModel):
+    model_name: str
+
+class ModelSwitchRequest(BaseModel):
+    model_name: str
+    force_download: bool = False
 
 # API Endpoints
 @app.on_event("startup")
@@ -181,6 +188,154 @@ async def action_endpoint(request: ActionRequest):
 async def get_actions():
     """Get list of available actions"""
     return router.get_available_actions()
+
+# Model Management Endpoints
+@app.post("/model/check")
+async def check_model_availability(request: ModelRequest):
+    """Check if a model is available locally"""
+    try:
+        logging.info(f"Checking availability of model: {request.model_name}")
+        
+        # Check if model is available
+        available = llm.is_model_available(request.model_name)
+        current_model = llm.get_current_model()
+        
+        return {
+            "success": True,
+            "available": available,
+            "current_model": current_model,
+            "model_name": request.model_name,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error checking model availability: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/model/download")
+async def download_model(request: ModelRequest):
+    """Start downloading a model"""
+    try:
+        logging.info(f"Starting download of model: {request.model_name}")
+        
+        # Start download process
+        success = await llm.download_model(request.model_name)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Download started for {request.model_name}",
+                "model_name": request.model_name,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to start model download",
+                "model_name": request.model_name,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logging.error(f"Error downloading model: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/model/progress")
+async def get_download_progress():
+    """Get current download progress"""
+    try:
+        progress = llm.get_download_progress()
+        
+        return {
+            "success": True,
+            "progress": progress,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting download progress: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "progress": 0,
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/model/switch")
+async def switch_model(request: ModelRequest):
+    """Switch to a different model"""
+    try:
+        logging.info(f"Switching to model: {request.model_name}")
+        
+        # Check if model is available
+        if not llm.is_model_available(request.model_name):
+            return {
+                "success": False,
+                "error": f"Model {request.model_name} is not available locally",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Switch to the new model
+        success = await llm.switch_model(request.model_name)
+        
+        if success:
+            # Broadcast model change to all WebSocket connections
+            await manager.broadcast({
+                "type": "model_changed",
+                "data": {
+                    "new_model": request.model_name,
+                    "timestamp": datetime.now().isoformat()
+                }
+            })
+            
+            return {
+                "success": True,
+                "message": f"Successfully switched to {request.model_name}",
+                "current_model": request.model_name,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to switch to {request.model_name}",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logging.error(f"Error switching model: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/model/current")
+async def get_current_model():
+    """Get the currently loaded model"""
+    try:
+        current_model = llm.get_current_model()
+        
+        return {
+            "success": True,
+            "current_model": current_model,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting current model: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
