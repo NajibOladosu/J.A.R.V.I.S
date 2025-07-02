@@ -202,6 +202,11 @@ async function startPythonBackend() {
                 currentPort = parseInt(portMatch[1]);
                 console.log(`Backend using port: ${currentPort}`);
             }
+            
+            // Look for server start confirmation
+            if (output.includes('Application startup complete')) {
+                console.log('Backend startup confirmed');
+            }
         });
 
         pythonProcess.stderr.on('data', (data) => {
@@ -374,17 +379,30 @@ function setupIPC() {
     // Handle backend HTTP requests (for settings)
     ipcMain.handle('send-backend-request', async (event, request) => {
         try {
-            // Use dynamic import for node-fetch to handle potential ES module issues
+            // Try multiple approaches to get fetch function
             let fetch;
-            try {
-                fetch = require('node-fetch');
-            } catch (e) {
-                // If require fails, try dynamic import
-                const nodeFetch = await import('node-fetch');
-                fetch = nodeFetch.default;
+            
+            // Method 1: Try built-in fetch (Node 18+)
+            if (global.fetch) {
+                fetch = global.fetch;
+            } 
+            // Method 2: Try requiring node-fetch
+            else {
+                try {
+                    fetch = require('node-fetch');
+                } catch (requireError) {
+                    // Method 3: Try dynamic import of node-fetch
+                    try {
+                        const nodeFetch = await import('node-fetch');
+                        fetch = nodeFetch.default || nodeFetch;
+                    } catch (importError) {
+                        throw new Error('No fetch implementation available. Please install node-fetch or use Node.js 18+');
+                    }
+                }
             }
             
             const url = `http://127.0.0.1:${currentPort}${request.url}`;
+            console.log(`Making request to: ${url}`);
             
             const response = await fetch(url, {
                 method: request.method || 'GET',
@@ -394,7 +412,12 @@ function setupIPC() {
                 body: request.data ? JSON.stringify(request.data) : undefined
             });
 
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const data = await response.json();
+            console.log(`Backend response:`, data);
             return data;
         } catch (error) {
             console.error('Error sending backend request:', error);

@@ -164,8 +164,10 @@ class SettingsManager {
                     statusTextEl.className = 'status-text warning';
                 }
             } else {
-                statusTextEl.textContent = 'Unable to check model status - backend not connected';
+                const errorMsg = response ? `Backend error: ${response.error}` : 'Unable to check model status - backend not connected';
+                statusTextEl.textContent = errorMsg;
                 statusTextEl.className = 'status-text error';
+                console.error('Model check failed:', response);
             }
         } catch (error) {
             console.error('Error checking model availability:', error);
