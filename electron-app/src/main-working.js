@@ -374,7 +374,16 @@ function setupIPC() {
     // Handle backend HTTP requests (for settings)
     ipcMain.handle('send-backend-request', async (event, request) => {
         try {
-            const fetch = require('node-fetch');
+            // Use dynamic import for node-fetch to handle potential ES module issues
+            let fetch;
+            try {
+                fetch = require('node-fetch');
+            } catch (e) {
+                // If require fails, try dynamic import
+                const nodeFetch = await import('node-fetch');
+                fetch = nodeFetch.default;
+            }
+            
             const url = `http://127.0.0.1:${currentPort}${request.url}`;
             
             const response = await fetch(url, {
