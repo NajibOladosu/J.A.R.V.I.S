@@ -26,28 +26,46 @@ class JarvisLauncher:
         """Check if all dependencies are installed"""
         print("🔍 Checking dependencies...")
         
-        # Check Python dependencies
         try:
-            import gpt4all
-            import fastapi
-            import uvicorn
-            print("✅ Python dependencies are installed")
-        except ImportError as e:
-            print(f"❌ Missing Python dependency: {e}")
-            print("Installing Python dependencies...")
-            subprocess.run([
-                sys.executable, "-m", "pip", "install", "-r", 
-                str(self.python_backend_dir / "requirements.txt")
-            ], check=True)
-        
-        # Check Node.js dependencies
-        if not (self.electron_app_dir / "node_modules").exists():
-            print("📦 Installing Node.js dependencies...")
-            subprocess.run([
-                self.npm_cmd, "install"
-            ], cwd=self.electron_app_dir, check=True)
-        else:
-            print("✅ Node.js dependencies are installed")
+            # Check Python dependencies
+            try:
+                import gpt4all
+                import fastapi
+                import uvicorn
+                # Test psutil import separately to catch sysctl issues
+                try:
+                    import psutil
+                    print("✅ Python dependencies are installed")
+                except Exception as psutil_error:
+                    if 'sysctl' in str(psutil_error) or 'proc_translated' in str(psutil_error):
+                        print("⚠️  psutil has macOS compatibility issues but will likely work during runtime")
+                        print("✅ Core Python dependencies are installed")
+                    else:
+                        raise psutil_error
+            except ImportError as e:
+                print(f"❌ Missing Python dependency: {e}")
+                print("Installing Python dependencies...")
+                subprocess.run([
+                    sys.executable, "-m", "pip", "install", "-r", 
+                    str(self.python_backend_dir / "requirements.txt")
+                ], check=True)
+            
+            # Check Node.js dependencies
+            if not (self.electron_app_dir / "node_modules").exists():
+                print("📦 Installing Node.js dependencies...")
+                subprocess.run([
+                    self.npm_cmd, "install"
+                ], cwd=self.electron_app_dir, check=True)
+            else:
+                print("✅ Node.js dependencies are installed")
+                
+        except subprocess.CalledProcessError as e:
+            if 'sysctl' in str(e) or 'proc_translated' in str(e):
+                print(f"⚠️  macOS system call failed during dependency check: {e}")
+                print("   This is likely a macOS/psutil compatibility issue")
+                print("   Continuing with startup - backend services may still work...")
+            else:
+                raise
     
     def initialize_ai_model(self):
         """Pre-download and initialize the AI model"""
@@ -55,14 +73,44 @@ class JarvisLauncher:
         print("   This may take several minutes on first run to download the model...")
         
         try:
+            # Patch subprocess.run to handle the sysctl.proc_translated issue
+            original_subprocess_run = subprocess.run
+            
+            def patched_subprocess_run(*args, **kwargs):
+                # Check if this is the problematic sysctl call
+                if (args and len(args) > 0 and 
+                    isinstance(args[0], list) and 
+                    len(args[0]) >= 3 and 
+                    args[0][:3] == ['sysctl', '-n', 'sysctl.proc_translated']):
+                    # Return a fake result indicating not running under Rosetta
+                    class FakeResult:
+                        def __init__(self):
+                            self.stdout = "0"
+                            self.stderr = ""
+                            self.returncode = 0
+                        def strip(self):
+                            return "0"
+                    result = FakeResult()
+                    result.stdout = result  # Make stdout.strip() work
+                    return result
+                else:
+                    return original_subprocess_run(*args, **kwargs)
+            
+            # Apply the patch
+            subprocess.run = patched_subprocess_run
+            
             # Import here to avoid issues if gpt4all isn't installed yet
             from gpt4all import GPT4All
+            
+            # Restore original subprocess.run
+            subprocess.run = original_subprocess_run
             
             model_name = "orca-mini-3b-gguf2-q4_0.gguf"
             print(f"   Downloading/loading model: {model_name}")
             
             # Create the model instance (this will download if needed)
-            model = GPT4All(model_name, allow_download=True)
+            # Set device to 'cpu' to avoid potential GPU/Metal detection issues on macOS
+            model = GPT4All(model_name, allow_download=True, device='cpu')
             
             # Test the model with a simple prompt to ensure it's working
             print("   Testing model...")
@@ -72,9 +120,17 @@ class JarvisLauncher:
             print(f"   Model test response: {test_response[:50]}...")
             return True
             
+        except subprocess.CalledProcessError as e:
+            if 'sysctl' in str(e):
+                print(f"❌ Failed to initialize AI model due to system detection issue: {e}")
+                print("   This is likely a macOS compatibility issue with GPT4All")
+                print("   The issue occurs at the library import level and cannot be resolved")
+                return False
+            else:
+                print(f"❌ Failed to initialize AI model: {e}")
+                return False
         except Exception as e:
             print(f"❌ Failed to initialize AI model: {e}")
-            print("   You can set JARVIS_USE_MOCK=true to run without the AI model")
             return False
     
     def start_python_backend(self):
@@ -186,12 +242,7 @@ class JarvisLauncher:
             # Initialize AI model before starting services
             if not self.initialize_ai_model():
                 print("❌ Failed to initialize AI model")
-                mock_env = os.getenv("JARVIS_USE_MOCK", "false").lower()
-                if mock_env != "true":
-                    print("💡 Tip: Set JARVIS_USE_MOCK=true to run without AI model")
-                    return 1
-                else:
-                    print("🔄 Continuing with mock mode...")
+                return 1
             
             # Start backend
             if not self.start_python_backend():
@@ -236,6 +287,15 @@ class JarvisLauncher:
             self.cleanup()
             return 0
             
+        except subprocess.CalledProcessError as e:
+            if 'sysctl' in str(e) or 'proc_translated' in str(e):
+                print(f"❌ macOS system compatibility issue: {e}")
+                print("🔄 This may be related to Rosetta/M1 Mac compatibility")
+                print("💡 This should be handled by the sysctl patch in the code")
+            else:
+                print(f"❌ Unexpected subprocess error: {e}")
+            self.cleanup()
+            return 1
         except Exception as e:
             print(f"❌ Unexpected error: {e}")
             self.cleanup()

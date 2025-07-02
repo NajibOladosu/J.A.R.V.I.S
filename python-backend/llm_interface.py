@@ -3,9 +3,45 @@ import logging
 import os
 import asyncio
 import signal
+import subprocess
 from typing import Dict, Any
-from gpt4all import GPT4All
 from settings_manager import settings
+
+# Patch subprocess.run to handle the sysctl.proc_translated issue
+original_subprocess_run = subprocess.run
+
+def patched_subprocess_run(*args, **kwargs):
+    # Check if this is the problematic sysctl call
+    if (args and len(args) > 0 and 
+        isinstance(args[0], list) and 
+        len(args[0]) >= 3 and 
+        args[0][:3] == ['sysctl', '-n', 'sysctl.proc_translated']):
+        # Return a fake result indicating not running under Rosetta
+        class FakeResult:
+            def __init__(self):
+                self.stdout = "0"
+                self.stderr = ""
+                self.returncode = 0
+            def strip(self):
+                return "0"
+        result = FakeResult()
+        result.stdout = result  # Make stdout.strip() work
+        return result
+    else:
+        return original_subprocess_run(*args, **kwargs)
+
+# Apply the patch
+subprocess.run = patched_subprocess_run
+
+try:
+    from gpt4all import GPT4All
+    logging.info("GPT4All imported successfully with sysctl patch")
+except Exception as e:
+    logging.error(f"GPT4All import failed: {e}")
+    raise
+finally:
+    # Restore original subprocess.run
+    subprocess.run = original_subprocess_run
 
 class LLMInterface:
     def __init__(self, model_name: str = None):
@@ -13,7 +49,6 @@ class LLMInterface:
         self.model_name = model_name or settings.get_ai_model()
         self.model = None
         self.model_initialized = False
-        self.use_mock_responses = settings.is_mock_mode()
         self.system_prompt = """You are JARVIS, a helpful AI assistant. You help users with various tasks.
 
 IMPORTANT: You must respond with ONLY a JSON object in this exact format:
@@ -43,35 +78,25 @@ RESPOND ONLY WITH THE JSON OBJECT - NO OTHER TEXT."""
     async def reload_settings(self):
         """Reload settings and reinitialize model if needed"""
         old_model_name = self.model_name
-        old_mock_mode = self.use_mock_responses
         
         # Reload settings
         settings.load_settings()
         new_model_name = settings.get_ai_model()
-        new_mock_mode = settings.is_mock_mode()
         
-        # Check if model or mock mode changed
-        if (old_model_name != new_model_name or old_mock_mode != new_mock_mode):
-            logging.info(f"Settings changed: model {old_model_name} -> {new_model_name}, mock {old_mock_mode} -> {new_mock_mode}")
+        # Check if model changed
+        if old_model_name != new_model_name:
+            logging.info(f"Model changed: {old_model_name} -> {new_model_name}")
             
             self.model_name = new_model_name
-            self.use_mock_responses = new_mock_mode
             
-            # Reset model if we're switching to/from mock mode or different model
-            if old_mock_mode != new_mock_mode or old_model_name != new_model_name:
-                self.model = None
-                self.model_initialized = False
-                logging.info("Model will be reinitialized on next request")
+            # Reset model for different model
+            self.model = None
+            self.model_initialized = False
+            logging.info("Model will be reinitialized on next request")
 
     async def initialize(self):
         """Initialize the GPT4All model (assumes model is already downloaded)"""
         if self.model_initialized:
-            return True
-            
-        # Check if we should use mock mode
-        if self.use_mock_responses:
-            logging.info("Using mock mode - no model initialization needed")
-            self.model_initialized = True
             return True
             
         logging.info(f"Loading GPT4All model {self.model_name}...")
@@ -104,15 +129,11 @@ RESPOND ONLY WITH THE JSON OBJECT - NO OTHER TEXT."""
 
     async def generate_response(self, user_input: str, context: str = "") -> Dict[str, Any]:
         """Generate response from the LLM"""
-        # Use mock responses if enabled (for testing without model download)
-        if self.use_mock_responses:
-            return self._generate_mock_response(user_input)
-            
         if not self.model_initialized:
             success = await self.initialize()
             if not success:
                 return {
-                    "response": "I'm sorry, I'm having trouble initializing my AI model. You can try setting JARVIS_USE_MOCK=true for testing without the full model.",
+                    "response": "I'm sorry, I'm having trouble initializing my AI model. Please check the logs for details.",
                     "action": None,
                     "params": {}
                 }
@@ -218,47 +239,6 @@ JARVIS:"""
             logging.error(f"Error generating response: {e}")
             return {
                 "response": "I'm sorry, I encountered an error processing your request.",
-                "action": None,
-                "params": {}
-            }
-    
-    def _generate_mock_response(self, user_input: str) -> Dict[str, Any]:
-        """Generate mock responses for testing without model download"""
-        user_lower = user_input.lower()
-        
-        if any(word in user_lower for word in ["create", "make", "write", "file", "document"]):
-            return {
-                "response": "I'll create a document for you using mock mode.",
-                "action": "create_document",
-                "params": {"name": "test_document.txt", "content": "This is a test document created in mock mode."}
-            }
-        elif any(word in user_lower for word in ["find", "search", "look"]):
-            return {
-                "response": "I'll search for files using mock mode.",
-                "action": "find_files", 
-                "params": {"extension": "txt", "folder": "."}
-            }
-        elif any(word in user_lower for word in ["alarm", "reminder", "remind"]):
-            return {
-                "response": "I'll set a reminder for you using mock mode.",
-                "action": "set_alarm",
-                "params": {"minutes": 5, "message": "Test reminder"}
-            }
-        elif any(word in user_lower for word in ["system", "info", "status"]):
-            return {
-                "response": "Here's your system information in mock mode.",
-                "action": "get_system_info",
-                "params": {}
-            }
-        elif any(word in user_lower for word in ["open", "launch", "start"]):
-            return {
-                "response": "I'll open an application for you using mock mode.",
-                "action": "open_app",
-                "params": {"app_name": "calculator"}
-            }
-        else:
-            return {
-                "response": f"I understand you said: '{user_input}'. I'm running in mock mode for testing. Try asking me to create a file, set a reminder, or get system info!",
                 "action": None,
                 "params": {}
             }

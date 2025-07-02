@@ -489,12 +489,6 @@ class WorkingJarvisRenderer {
             modelSelect.value = selectedModel;
         }
 
-        // Load mock mode setting
-        const mockMode = localStorage.getItem('jarvis-mock-mode') === 'true';
-        const enableMockCheck = document.getElementById('enableMockCheck');
-        if (enableMockCheck) {
-            enableMockCheck.checked = mockMode;
-        }
     }
 
     async saveSettings() {
@@ -505,7 +499,6 @@ class WorkingJarvisRenderer {
             const autoStartCheck = document.getElementById('autoStartCheck');
             const pythonPortInput = document.getElementById('pythonPortInput');
             const modelSelect = document.getElementById('modelSelect');
-            const enableMockCheck = document.getElementById('enableMockCheck');
 
             // Create settings object for frontend storage
             const frontendSettings = {
@@ -514,7 +507,6 @@ class WorkingJarvisRenderer {
                 'jarvis-auto-start': autoStartCheck?.checked === true,
                 'jarvis-backend-port': pythonPortInput?.value || '8000',
                 'jarvis-ai-model': modelSelect?.value || 'orca-mini-3b-gguf2-q4_0.gguf',
-                'jarvis-mock-mode': enableMockCheck?.checked === true
             };
 
             // Save to localStorage
@@ -570,7 +562,6 @@ class WorkingJarvisRenderer {
             const autoStartCheck = document.getElementById('autoStartCheck');
             const pythonPortInput = document.getElementById('pythonPortInput');
             const modelSelect = document.getElementById('modelSelect');
-            const enableMockCheck = document.getElementById('enableMockCheck');
 
             // Create settings object for frontend storage
             const frontendSettings = {
@@ -579,7 +570,6 @@ class WorkingJarvisRenderer {
                 'jarvis-auto-start': autoStartCheck?.checked === true,
                 'jarvis-backend-port': pythonPortInput?.value || '8000',
                 'jarvis-ai-model': modelSelect?.value || 'orca-mini-3b-gguf2-q4_0.gguf',
-                'jarvis-mock-mode': enableMockCheck?.checked === true
             };
 
             // Save to localStorage
