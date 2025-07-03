@@ -4,10 +4,13 @@ import logging
 import asyncio
 from typing import Dict, Any
 import threading
+import time
 
 class VoiceTasks:
     def __init__(self):
         # Initialize TTS engine
+        self._microphone_lock = threading.Lock()
+        self._last_listen_time = 0
         self.tts_engine = None
         try:
             import platform
@@ -67,9 +70,9 @@ class VoiceTasks:
             return
         
         try:
-            # Adjust for ambient noise
-            with self.microphone as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            # Initial ambient noise adjustment will be done per-request
+            # to avoid context manager conflicts
+            logging.info("Microphone initialized successfully")
             
         except Exception as e:
             logging.error(f"Error setting up microphone: {e}")
@@ -120,25 +123,49 @@ class VoiceTasks:
                     "message": "Microphone not available"
                 }
             
+            # Prevent concurrent microphone access
+            current_time = time.time()
+            if current_time - self._last_listen_time < 1.0:  # 1 second cooldown
+                return {
+                    "success": False,
+                    "message": "Please wait a moment before trying again",
+                    "timeout": True
+                }
+            
             def listen_sync():
                 try:
-                    with self.microphone as source:
-                        audio = self.recognizer.listen(
-                            source, 
-                            timeout=timeout, 
-                            phrase_time_limit=phrase_timeout
-                        )
-                    
-                    # Use Google Speech Recognition (requires internet)
-                    text = self.recognizer.recognize_google(audio)
-                    return text
-                    
+                    # Acquire lock to prevent concurrent access
+                    with self._microphone_lock:
+                        with self.microphone as source:
+                            # Quick ambient noise adjustment
+                            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                            
+                            # Listen for speech
+                            logging.info(f"Listening for speech (timeout: {timeout}s)...")
+                            audio = self.recognizer.listen(
+                                source, 
+                                timeout=timeout, 
+                                phrase_time_limit=phrase_timeout
+                            )
+                        
+                        # Use Google Speech Recognition (requires internet)
+                        logging.info("Processing speech...")
+                        text = self.recognizer.recognize_google(audio)
+                        return text
+                        
                 except sr.WaitTimeoutError:
                     return None
                 except sr.UnknownValueError:
                     return ""
+                except sr.RequestError as e:
+                    logging.error(f"Speech recognition service error: {e}")
+                    return f"SERVICE_ERROR: {str(e)}"
                 except Exception as e:
+                    logging.error(f"Speech recognition error: {e}")
                     raise e
+            
+            # Update last listen time
+            self._last_listen_time = current_time
             
             # Run in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -153,8 +180,13 @@ class VoiceTasks:
             elif text == "":
                 return {
                     "success": False,
-                    "message": "Could not understand speech",
+                    "message": "Could not understand speech - please speak more clearly",
                     "unclear": True
+                }
+            elif text.startswith("SERVICE_ERROR:"):
+                return {
+                    "success": False,
+                    "message": f"Speech recognition service unavailable: {text[14:]}"
                 }
             else:
                 logging.info(f"Speech recognized: {text}")

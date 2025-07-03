@@ -7,6 +7,7 @@ class WorkingJarvisRenderer {
         this.isInitialized = false;
         this.messageHistory = [];
         this.isProcessing = false;
+        this.isListening = false;
         this.backendConnected = false;
         this.init();
     }
@@ -408,6 +409,11 @@ class WorkingJarvisRenderer {
             return;
         }
 
+        if (this.isListening) {
+            this.addMessage('Already listening for voice input. Please wait.', 'ai', 'warning');
+            return;
+        }
+
         if (!this.backendConnected) {
             this.addMessage('Voice input requires connection to the AI backend. Please wait for the system to connect.', 'ai', 'warning');
             return;
@@ -417,6 +423,9 @@ class WorkingJarvisRenderer {
         const listenBtn = document.getElementById('listenBtn');
 
         try {
+            // Set listening state to prevent concurrent requests
+            this.isListening = true;
+            
             // Visual feedback - show listening state
             this.setVoiceButtonState('listening');
             this.addMessage('🎤 Listening... Please speak now.', 'ai', 'normal');
@@ -432,6 +441,7 @@ class WorkingJarvisRenderer {
             });
 
             this.setVoiceButtonState('idle');
+            this.isListening = false;
 
             if (response && response.success && response.result) {
                 const result = response.result;
@@ -454,6 +464,7 @@ class WorkingJarvisRenderer {
         } catch (error) {
             console.error('Voice input error:', error);
             this.setVoiceButtonState('idle');
+            this.isListening = false;
             this.addMessage('🎤 Voice input failed due to a technical error. Please try again.', 'ai', 'error');
         }
     }
