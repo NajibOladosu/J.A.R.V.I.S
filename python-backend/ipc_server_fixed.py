@@ -13,6 +13,7 @@ import uvicorn
 from llm_interface import LLMInterface
 from intent_parser import IntentParser
 from task_router import TaskRouter
+from settings_manager import settings
 
 # Configure logging
 logging.basicConfig(
@@ -331,6 +332,95 @@ async def get_current_model():
         
     except Exception as e:
         logging.error(f"Error getting current model: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+# Settings endpoints
+@app.get("/settings")
+async def get_settings():
+    """Get current settings"""
+    try:
+        return {
+            "success": True,
+            "settings": settings.settings,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logging.error(f"Error getting settings: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/settings")
+async def update_settings(request: dict):
+    """Update settings from frontend"""
+    try:
+        # Update settings from frontend format
+        success = settings.update_from_frontend(request)
+        
+        if success:
+            # If AI model changed, reload LLM interface
+            if 'jarvis-ai-model' in request:
+                await llm.reload_settings()
+            
+            return {
+                "success": True,
+                "message": "Settings updated successfully",
+                "settings": settings.settings,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to update settings",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logging.error(f"Error updating settings: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/settings/sync-frontend")
+async def sync_frontend_settings(request: dict):
+    """Sync frontend localStorage settings with backend"""
+    try:
+        logging.info(f"Syncing frontend settings: {request}")
+        
+        # Update backend settings from frontend localStorage
+        success = settings.update_from_frontend(request)
+        
+        if success:
+            # If AI model changed, switch to it if available
+            if 'jarvis-ai-model' in request:
+                new_model = request['jarvis-ai-model']
+                if llm.is_model_available(new_model):
+                    await llm.switch_model(new_model)
+                    logging.info(f"Switched to model from frontend settings: {new_model}")
+            
+            return {
+                "success": True,
+                "message": "Frontend settings synced successfully",
+                "settings": settings.settings,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to sync frontend settings",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logging.error(f"Error syncing frontend settings: {e}")
         return {
             "success": False,
             "error": str(e),

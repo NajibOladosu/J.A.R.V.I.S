@@ -138,24 +138,32 @@ class VoiceTasks:
                     with self._microphone_lock:
                         with self.microphone as source:
                             # Quick ambient noise adjustment
-                            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                            logging.info("Adjusting for ambient noise...")
+                            self.recognizer.adjust_for_ambient_noise(source, duration=1.0)
                             
                             # Listen for speech
-                            logging.info(f"Listening for speech (timeout: {timeout}s)...")
+                            logging.info(f"Listening for speech (timeout: {timeout}s, phrase_limit: {phrase_timeout}s)...")
+                            logging.info(f"Microphone energy threshold: {self.recognizer.energy_threshold}")
+                            
                             audio = self.recognizer.listen(
                                 source, 
                                 timeout=timeout, 
                                 phrase_time_limit=phrase_timeout
                             )
+                            
+                            logging.info("Audio captured successfully")
                         
                         # Use Google Speech Recognition (requires internet)
-                        logging.info("Processing speech...")
+                        logging.info("Processing speech with Google Speech Recognition...")
                         text = self.recognizer.recognize_google(audio)
+                        logging.info(f"Speech recognition successful: '{text}'")
                         return text
                         
                 except sr.WaitTimeoutError:
+                    logging.info("Speech recognition timeout - no speech detected")
                     return None
                 except sr.UnknownValueError:
+                    logging.warning("Speech recognition could not understand audio")
                     return ""
                 except sr.RequestError as e:
                     logging.error(f"Speech recognition service error: {e}")
