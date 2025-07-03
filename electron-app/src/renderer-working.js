@@ -110,6 +110,8 @@ class WorkingJarvisRenderer {
     setupChatInterface() {
         const messageInput = document.getElementById('messageInput');
         const sendBtn = document.getElementById('sendBtn');
+        const voiceToggle = document.getElementById('voiceToggle');
+        const listenBtn = document.getElementById('listenBtn');
 
         if (sendBtn) {
             sendBtn.addEventListener('click', () => {
@@ -123,6 +125,19 @@ class WorkingJarvisRenderer {
                     e.preventDefault();
                     this.sendMessage();
                 }
+            });
+        }
+
+        // Voice input buttons
+        if (voiceToggle) {
+            voiceToggle.addEventListener('click', () => {
+                this.handleVoiceInput();
+            });
+        }
+
+        if (listenBtn) {
+            listenBtn.addEventListener('click', () => {
+                this.handleVoiceInput();
             });
         }
 
@@ -384,6 +399,92 @@ class WorkingJarvisRenderer {
             localStorage.setItem('chatHistory', JSON.stringify(limitedHistory));
         } catch (error) {
             console.error('Error saving to history:', error);
+        }
+    }
+
+    async handleVoiceInput() {
+        if (this.isProcessing) {
+            this.addMessage('Please wait for the current operation to complete.', 'ai', 'warning');
+            return;
+        }
+
+        if (!this.backendConnected) {
+            this.addMessage('Voice input requires connection to the AI backend. Please wait for the system to connect.', 'ai', 'warning');
+            return;
+        }
+
+        const voiceToggle = document.getElementById('voiceToggle');
+        const listenBtn = document.getElementById('listenBtn');
+
+        try {
+            // Visual feedback - show listening state
+            this.setVoiceButtonState('listening');
+            this.addMessage('🎤 Listening... Please speak now.', 'ai', 'normal');
+
+            // Call voice listen endpoint
+            const response = await ipcRenderer.invoke('send-backend-request', {
+                url: '/voice/listen',
+                method: 'POST',
+                data: {
+                    timeout: 10,
+                    phrase_timeout: 2
+                }
+            });
+
+            this.setVoiceButtonState('idle');
+
+            if (response && response.success && response.result) {
+                const result = response.result;
+                
+                if (result.success && result.text) {
+                    // Display recognized text and send as message
+                    this.addMessage(`🎤 "${result.text}"`, 'user');
+                    this.sendMessage(result.text);
+                } else if (result.timeout) {
+                    this.addMessage('🎤 No speech detected. Please try again.', 'ai', 'warning');
+                } else if (result.unclear) {
+                    this.addMessage('🎤 Could not understand the speech. Please speak clearly and try again.', 'ai', 'warning');
+                } else {
+                    this.addMessage(`🎤 Voice input failed: ${result.message || 'Unknown error'}`, 'ai', 'error');
+                }
+            } else {
+                this.addMessage('🎤 Voice input service is not available. Please check if a microphone is connected.', 'ai', 'error');
+            }
+
+        } catch (error) {
+            console.error('Voice input error:', error);
+            this.setVoiceButtonState('idle');
+            this.addMessage('🎤 Voice input failed due to a technical error. Please try again.', 'ai', 'error');
+        }
+    }
+
+    setVoiceButtonState(state) {
+        const voiceToggle = document.getElementById('voiceToggle');
+        const listenBtn = document.getElementById('listenBtn');
+
+        // Remove existing state classes
+        [voiceToggle, listenBtn].forEach(btn => {
+            if (btn) {
+                btn.classList.remove('listening', 'idle', 'error');
+                btn.classList.add(state);
+            }
+        });
+
+        // Update button appearance based on state
+        if (state === 'listening') {
+            [voiceToggle, listenBtn].forEach(btn => {
+                if (btn) {
+                    btn.style.color = '#ff6b6b';
+                    btn.style.animation = 'pulse 1.5s infinite';
+                }
+            });
+        } else {
+            [voiceToggle, listenBtn].forEach(btn => {
+                if (btn) {
+                    btn.style.color = '';
+                    btn.style.animation = '';
+                }
+            });
         }
     }
 

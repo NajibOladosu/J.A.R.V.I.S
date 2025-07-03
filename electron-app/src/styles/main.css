@@ -984,3 +984,37 @@ body {
     opacity: 0.5;
     pointer-events: none;
 }
+
+/* Voice Input Animations */
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.voice-btn.listening,
+.input-btn.listening {
+    color: #ff6b6b !important;
+    animation: pulse 1.5s infinite;
+}
+
+.voice-btn:hover,
+.input-btn:hover {
+    background-color: var(--bg-tertiary);
+    transform: scale(1.05);
+    transition: all 0.2s ease;
+}
+
+.voice-btn.listening:hover,
+.input-btn.listening:hover {
+    color: #ff5252 !important;
+}
