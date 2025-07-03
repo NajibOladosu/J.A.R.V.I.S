@@ -263,8 +263,6 @@ class JarvisLauncher:
             # Wait for Electron process to finish
             try:
                 print("Waiting for Electron to close (or press Ctrl+C to force quit)...")
-                start_time = time.time()
-                timeout = 300  # 5 minutes max wait
                 
                 while True:
                     # Check if Electron process is still running
@@ -272,12 +270,7 @@ class JarvisLauncher:
                         print("Electron process has terminated")
                         break
                     
-                    # Check for timeout
-                    if time.time() - start_time > timeout:
-                        print("Timeout waiting for Electron to close, forcing shutdown...")
-                        break
-                    
-                    # Check every second
+                    # Check every second - no timeout, let it run indefinitely
                     time.sleep(1)
                     
             except KeyboardInterrupt:

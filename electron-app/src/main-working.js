@@ -72,12 +72,6 @@ function createMainWindow() {
             console.log('Forcing app quit...');
             app.quit();
         }
-        
-        // Force exit if app doesn't quit gracefully
-        setTimeout(() => {
-            console.log('Force exiting process...');
-            process.exit(0);
-        }, 2000);
     });
 
     setupMenu();
@@ -518,11 +512,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-    // Quit app when all windows are closed (including on macOS)
-    console.log('All windows closed, quitting app...');
-    isQuitting = true;
-    cleanup();
-    app.quit();
+    // Only quit when the main window is closed, not when settings or other secondary windows are closed
+    if (!mainWindow) {
+        console.log('Main window closed, quitting app...');
+        isQuitting = true;
+        cleanup();
+        app.quit();
+    } else {
+        console.log('Secondary window closed, keeping app running...');
+    }
 });
 
 app.on('activate', () => {
