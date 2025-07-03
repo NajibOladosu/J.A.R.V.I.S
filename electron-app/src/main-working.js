@@ -9,6 +9,7 @@ const fs = require('fs');
 const store = new Store();
 
 let mainWindow = null;
+let settingsWindow = null;
 let pythonProcess = null;
 let ws = null;
 let isQuitting = false;
@@ -71,15 +72,65 @@ function createMainWindow() {
             console.log('Forcing app quit...');
             app.quit();
         }
-        
-        // Force exit if app doesn't quit gracefully
-        setTimeout(() => {
-            console.log('Force exiting process...');
-            process.exit(0);
-        }, 2000);
     });
 
     setupMenu();
+}
+
+function createSettingsWindow() {
+    // Don't create multiple settings windows
+    if (settingsWindow) {
+        settingsWindow.focus();
+        return;
+    }
+
+    console.log('Creating settings window...');
+    
+    settingsWindow = new BrowserWindow({
+        width: 600,
+        height: 700,
+        minWidth: 500,
+        minHeight: 600,
+        resizable: true,
+        minimizable: true,
+        maximizable: false,
+        frame: process.platform !== 'darwin',
+        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        backgroundColor: '#0a0a0a',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+            enableRemoteModule: true
+        },
+        show: false,
+        parent: mainWindow,
+        modal: false
+    });
+
+    const settingsHtmlPath = path.join(__dirname, 'settings.html');
+    console.log('Loading settings HTML from:', settingsHtmlPath);
+    settingsWindow.loadFile(settingsHtmlPath);
+
+    // Handle window events
+    settingsWindow.once('ready-to-show', () => {
+        console.log('Settings window ready to show');
+        settingsWindow.show();
+        
+        // Open DevTools in development
+        if (process.argv.includes('--dev')) {
+            settingsWindow.webContents.openDevTools();
+        }
+    });
+
+    settingsWindow.on('close', () => {
+        console.log('Settings window closed');
+        settingsWindow = null;
+    });
+
+    settingsWindow.on('closed', () => {
+        console.log('Settings window destroyed');
+        settingsWindow = null;
+    });
 }
 
 function setupMenu() {
@@ -116,52 +167,6 @@ function setupMenu() {
     Menu.setApplicationMenu(menu);
 }
 
-function setupIPC() {
-    // Window controls
-    ipcMain.handle('window-minimize', () => {
-        if (mainWindow) mainWindow.minimize();
-    });
-
-    ipcMain.handle('window-maximize', () => {
-        if (mainWindow) {
-            if (mainWindow.isMaximized()) {
-                mainWindow.unmaximize();
-            } else {
-                mainWindow.maximize();
-            }
-        }
-    });
-
-    ipcMain.handle('window-close', () => {
-        if (mainWindow) mainWindow.hide();
-    });
-
-    // Settings
-    ipcMain.handle('get-settings', () => {
-        return settings;
-    });
-
-    ipcMain.handle('save-settings', (event, newSettings) => {
-        Object.assign(settings, newSettings);
-        Object.keys(newSettings).forEach(key => {
-            store.set(key, newSettings[key]);
-        });
-        return settings;
-    });
-
-    // Communication with Python backend
-    ipcMain.handle('send-message', async (event, message) => {
-        return await sendToPython(message);
-    });
-
-    ipcMain.handle('get-backend-status', () => {
-        return {
-            connected: ws && ws.readyState === WebSocket.OPEN,
-            pythonRunning: pythonProcess && !pythonProcess.killed,
-            port: currentPort
-        };
-    });
-}
 
 async function startPythonBackend() {
     try {
@@ -190,6 +195,11 @@ async function startPythonBackend() {
             if (portMatch) {
                 currentPort = parseInt(portMatch[1]);
                 console.log(`Backend using port: ${currentPort}`);
+            }
+            
+            // Look for server start confirmation
+            if (output.includes('Application startup complete')) {
+                console.log('Backend startup confirmed');
             }
         });
 
@@ -235,12 +245,65 @@ async function startPythonBackend() {
     }
 }
 
+async function syncSettingsWithBackend() {
+    try {
+        console.log('Syncing frontend settings with backend...');
+        
+        // Get all frontend settings from localStorage (simulated since we're in main process)
+        const settingsData = {
+            'jarvis-ai-model': store.get('jarvis-ai-model', 'orca-mini-3b-gguf2-q4_0.gguf'),
+            'jarvis-voice-enabled': store.get('jarvis-voice-enabled', true),
+            'jarvis-auto-start': store.get('jarvis-auto-start', false),
+            'jarvis-backend-port': store.get('jarvis-backend-port', '8000'),
+            'jarvis-theme': store.get('jarvis-theme', 'dark')
+        };
+        
+        console.log('Frontend settings to sync:', settingsData);
+        
+        // Send sync request to backend
+        const url = `http://127.0.0.1:${currentPort}/settings/sync-frontend`;
+        console.log(`Syncing settings with: ${url}`);
+        
+        // Get fetch implementation
+        let fetch;
+        if (typeof globalThis.fetch !== 'undefined') {
+            fetch = globalThis.fetch;
+        } else {
+            try {
+                const nodeFetch = await import('node-fetch');
+                fetch = nodeFetch.default || nodeFetch;
+            } catch (importError) {
+                console.error('No fetch implementation available for settings sync');
+                return;
+            }
+        }
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(settingsData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Settings synced successfully:', result.message);
+        } else {
+            console.error('Failed to sync settings:', response.statusText);
+        }
+        
+    } catch (error) {
+        console.error('Error syncing settings with backend:', error);
+    }
+}
+
 function connectWebSocket() {
     try {
         console.log(`Connecting to WebSocket on port ${currentPort}...`);
         ws = new WebSocket(`ws://127.0.0.1:${currentPort}/ws`);
 
-        ws.on('open', () => {
+        ws.on('open', async () => {
             console.log('WebSocket connected to Python backend');
             if (mainWindow) {
                 mainWindow.webContents.send('backend-status', {
@@ -249,6 +312,9 @@ function connectWebSocket() {
                     port: currentPort
                 });
             }
+            
+            // Sync frontend settings with backend on connection
+            await syncSettingsWithBackend();
         });
 
         ws.on('message', (data) => {
@@ -363,18 +429,55 @@ function setupIPC() {
     // Handle backend HTTP requests (for settings)
     ipcMain.handle('send-backend-request', async (event, request) => {
         try {
-            const fetch = require('node-fetch');
+            // Try multiple approaches to get fetch function
+            let fetch;
+            
+            // Method 1: Try built-in fetch (Node 18+)
+            if (global.fetch) {
+                fetch = global.fetch;
+            } 
+            // Method 2: Try requiring node-fetch
+            else {
+                try {
+                    fetch = require('node-fetch');
+                } catch (requireError) {
+                    // Method 3: Try dynamic import of node-fetch
+                    try {
+                        const nodeFetch = await import('node-fetch');
+                        fetch = nodeFetch.default || nodeFetch;
+                    } catch (importError) {
+                        throw new Error('No fetch implementation available. Please install node-fetch or use Node.js 18+');
+                    }
+                }
+            }
+            
             const url = `http://127.0.0.1:${currentPort}${request.url}`;
+            console.log(`Making request to: ${url}`);
+            
+            // Set timeout based on request type - longer for downloads
+            const isDownloadRequest = request.url.includes('/model/download');
+            const timeoutMs = isDownloadRequest ? 120000 : 30000; // 2 minutes for downloads, 30s for others
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
             
             const response = await fetch(url, {
                 method: request.method || 'GET',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: request.data ? JSON.stringify(request.data) : undefined
+                body: request.data ? JSON.stringify(request.data) : undefined,
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
 
             const data = await response.json();
+            console.log(`Backend response:`, data);
             return data;
         } catch (error) {
             console.error('Error sending backend request:', error);
@@ -403,6 +506,30 @@ function setupIPC() {
     ipcMain.handle('window-close', (event) => {
         const window = BrowserWindow.fromWebContents(event.sender);
         window?.close();
+    });
+
+    // Settings window
+    ipcMain.handle('open-settings', () => {
+        createSettingsWindow();
+    });
+
+    ipcMain.handle('close-settings', () => {
+        if (settingsWindow) {
+            settingsWindow.close();
+        }
+    });
+
+    // Settings
+    ipcMain.handle('get-settings', () => {
+        return settings;
+    });
+
+    ipcMain.handle('save-settings', (event, newSettings) => {
+        Object.assign(settings, newSettings);
+        Object.keys(newSettings).forEach(key => {
+            store.set(key, newSettings[key]);
+        });
+        return settings;
     });
 }
 
@@ -451,11 +578,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-    // Quit app when all windows are closed (including on macOS)
-    console.log('All windows closed, quitting app...');
-    isQuitting = true;
-    cleanup();
-    app.quit();
+    // Only quit when the main window is closed, not when settings or other secondary windows are closed
+    if (!mainWindow) {
+        console.log('Main window closed, quitting app...');
+        isQuitting = true;
+        cleanup();
+        app.quit();
+    } else {
+        console.log('Secondary window closed, keeping app running...');
+    }
 });
 
 app.on('activate', () => {

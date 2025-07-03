@@ -242,3 +242,180 @@ JARVIS:"""
                 "action": None,
                 "params": {}
             }
+
+    # Model Management Methods
+    def is_model_available(self, model_name: str) -> bool:
+        """Check if a model is available locally"""
+        try:
+            from gpt4all.gpt4all import DEFAULT_MODEL_DIRECTORY
+            import glob
+            
+            model_dir = DEFAULT_MODEL_DIRECTORY
+            if not os.path.exists(model_dir):
+                return False
+            
+            # Check for exact filename
+            if os.path.exists(os.path.join(model_dir, model_name)):
+                return True
+            
+            # Check for variations with common extensions
+            for ext in ['', '.bin', '.gguf', '.q4_0.bin', '.q4_0.gguf']:
+                if os.path.exists(os.path.join(model_dir, model_name + ext)):
+                    return True
+                
+                # Also check without the extension if provided
+                name_without_ext = model_name.rsplit('.', 1)[0] if '.' in model_name else model_name
+                if os.path.exists(os.path.join(model_dir, name_without_ext + ext)):
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error checking model availability: {e}")
+            return False
+
+    def start_background_download(self, model_name: str) -> bool:
+        """Start a background download task"""
+        try:
+            if self.is_model_available(model_name):
+                logging.info(f"Model {model_name} is already available")
+                self._download_progress = 100
+                self._download_status = "completed"
+                return True
+            
+            logging.info(f"Starting background download of model: {model_name}")
+            
+            # Reset download state
+            self._download_progress = 0
+            self._download_status = "downloading"
+            self._download_error = None
+            self._downloading_model = model_name
+            
+            def download_worker():
+                try:
+                    logging.info(f"Download worker started for {model_name}")
+                    
+                    # Update progress incrementally for better UX
+                    self._download_progress = 10
+                    
+                    # Create a temporary GPT4All instance to trigger download
+                    # This is where the actual download happens
+                    temp_model = GPT4All(model_name, allow_download=True)
+                    
+                    # Mark as completed
+                    self._download_progress = 100
+                    self._download_status = "completed"
+                    logging.info(f"Download completed for {model_name}")
+                    return True
+                    
+                except FileNotFoundError as e:
+                    error_msg = f"Model file not found or invalid model name: {model_name}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+                except ConnectionError as e:
+                    error_msg = f"Network connection failed during download: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+                except OSError as e:
+                    if "No space left on device" in str(e):
+                        error_msg = "Insufficient disk space for model download"
+                    else:
+                        error_msg = f"System error during download: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+                except Exception as e:
+                    error_msg = f"Download failed for {model_name}: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+            
+            # Start download in a separate thread
+            import threading
+            download_thread = threading.Thread(target=download_worker, daemon=True)
+            download_thread.start()
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error starting download: {e}")
+            self._download_status = "failed"
+            self._download_error = str(e)
+            return False
+
+    async def download_model(self, model_name: str) -> bool:
+        """Start download and return immediately (non-blocking)"""
+        return self.start_background_download(model_name)
+
+    def get_download_progress(self) -> float:
+        """Get current download progress (0-100)"""
+        return getattr(self, '_download_progress', 0)
+    
+    def get_download_status(self) -> dict:
+        """Get detailed download status"""
+        return {
+            "progress": getattr(self, '_download_progress', 0),
+            "status": getattr(self, '_download_status', "idle"),
+            "model": getattr(self, '_downloading_model', None),
+            "error": getattr(self, '_download_error', None)
+        }
+
+    async def switch_model(self, model_name: str) -> bool:
+        """Switch to a different model"""
+        try:
+            logging.info(f"Attempting to switch to model: {model_name}")
+            
+            if not self.is_model_available(model_name):
+                logging.error(f"Model {model_name} is not available locally")
+                return False
+            
+            if self.model_name == model_name and self.model_initialized:
+                logging.info(f"Already using model {model_name}, but reinitializing to ensure it's loaded")
+                # Force reinitialize even if it's the "same" model
+                # This handles cases where the model might not actually be loaded
+                self.model = None
+                self.model_initialized = False
+            
+            logging.info(f"Switching from {self.model_name} to {model_name}")
+            
+            # Close current model if loaded
+            if self.model:
+                try:
+                    # GPT4All doesn't have an explicit close method, but we can dereference
+                    self.model = None
+                    logging.info("Previous model dereferenced")
+                except Exception as e:
+                    logging.warning(f"Error closing previous model: {e}")
+            
+            # Update model name and reset initialization
+            old_model_name = self.model_name
+            self.model_name = model_name
+            self.model_initialized = False
+            
+            logging.info(f"Model name updated from '{old_model_name}' to '{self.model_name}'")
+            
+            # Initialize new model
+            success = await self.initialize()
+            
+            if success and self.model_initialized:
+                logging.info(f"Successfully switched to and loaded model: {model_name}")
+                return True
+            else:
+                logging.error(f"Failed to initialize new model: {model_name}")
+                # Revert model name if initialization failed
+                self.model_name = old_model_name if old_model_name else "orca-mini-3b-gguf2-q4_0.gguf"
+                return False
+                
+        except Exception as e:
+            logging.error(f"Error switching model: {e}")
+            return False
+
+    def get_current_model(self) -> str:
+        """Get the name of the currently loaded model"""
+        return self.model_name or "No model loaded"

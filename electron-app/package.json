@@ -25,15 +25,17 @@
   "author": "JARVIS Team",
   "license": "MIT",
   "devDependencies": {
+    "@types/jest": "^29.5.0",
     "electron": "^27.0.0",
     "electron-builder": "^24.6.4",
     "eslint": "^8.50.0",
-    "jest": "^29.7.0",
-    "@types/jest": "^29.5.0"
+    "jest": "^29.7.0"
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["../tests/test_frontend.js"],
+    "testMatch": [
+      "../tests/test_frontend.js"
+    ],
     "collectCoverageFrom": [
       "src/**/*.js",
       "!src/main.js"
@@ -42,13 +44,15 @@
     "moduleNameMapper": {
       "^electron$": "<rootDir>/__mocks__/electron.js"
     },
-    "testPathIgnorePatterns": ["/node_modules/"],
+    "testPathIgnorePatterns": [
+      "/node_modules/"
+    ],
     "passWithNoTests": true
   },
   "dependencies": {
     "electron-store": "^8.1.0",
-    "ws": "^8.14.2",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "ws": "^8.14.2"
   },
   "build": {
     "appId": "com.jarvis.ai-assistant",
