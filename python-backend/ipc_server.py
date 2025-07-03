@@ -398,33 +398,48 @@ async def get_download_progress():
 async def switch_model(request: ModelSwitchRequest):
     """Switch to a different model"""
     try:
+        logging.info(f"Received model switch request for: {request.model_name}")
+        
         # First check if model is available
-        if not llm.is_model_available(request.model_name):
+        is_available = llm.is_model_available(request.model_name)
+        logging.info(f"Model {request.model_name} availability check: {is_available}")
+        
+        if not is_available:
             return {
                 "success": False,
                 "error": f"Model {request.model_name} is not available locally. Please download it first.",
                 "timestamp": datetime.now().isoformat()
             }
         
+        current_before = llm.get_current_model()
+        logging.info(f"Current model before switch: {current_before}")
+        
         success = await llm.switch_model(request.model_name)
+        
+        current_after = llm.get_current_model()
+        logging.info(f"Current model after switch: {current_after}")
+        logging.info(f"Model switch success: {success}")
         
         if success:
             # Update settings to reflect the new model
             settings.settings['ai_model'] = request.model_name
-            settings.save_settings()
+            settings_saved = settings.save_settings()
             
-            logging.info(f"Model switched and settings updated: {request.model_name}")
+            logging.info(f"Model switched and settings updated: {request.model_name}, settings saved: {settings_saved}")
             
             return {
                 "success": True,
                 "message": f"Successfully switched to model {request.model_name}",
-                "current_model": llm.get_current_model(),
+                "previous_model": current_before,
+                "current_model": current_after,
+                "model_initialized": llm.model_initialized,
                 "timestamp": datetime.now().isoformat()
             }
         else:
             return {
                 "success": False,
                 "error": f"Failed to switch to model {request.model_name}. Check logs for details.",
+                "current_model": current_after,
                 "timestamp": datetime.now().isoformat()
             }
         

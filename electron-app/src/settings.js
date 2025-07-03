@@ -316,10 +316,30 @@ class SettingsManager {
             const pythonPortInput = document.getElementById('pythonPortInput');
             const modelSelect = document.getElementById('modelSelect');
 
-            // Check if model has changed
-            const previousModel = localStorage.getItem('jarvis-ai-model') || 'orca-mini-3b-gguf2-q4_0.gguf';
+            // Check if model has changed by comparing with backend's current model
             const selectedModel = modelSelect?.value || 'orca-mini-3b-gguf2-q4_0.gguf';
-            const modelChanged = previousModel !== selectedModel;
+            
+            console.log('Model change detection:');
+            console.log('Selected model:', selectedModel);
+            
+            // Get current model from backend to compare
+            let backendCurrentModel = null;
+            try {
+                const currentModelResponse = await this.sendBackendRequest('/model/current', {
+                    method: 'GET'
+                });
+                backendCurrentModel = currentModelResponse?.current_model;
+                console.log('Backend current model:', backendCurrentModel);
+            } catch (error) {
+                console.error('Error getting current model from backend:', error);
+            }
+            
+            const previousModel = localStorage.getItem('jarvis-ai-model') || 'orca-mini-3b-gguf2-q4_0.gguf';
+            console.log('localStorage model:', previousModel);
+            
+            // Consider it changed if it's different from either localStorage or backend
+            const modelChanged = (previousModel !== selectedModel) || (backendCurrentModel && backendCurrentModel !== selectedModel);
+            console.log('Model changed:', modelChanged);
 
             // Create settings object for frontend storage
             const frontendSettings = {
@@ -342,20 +362,27 @@ class SettingsManager {
 
             // Handle model changes
             if (modelChanged) {
+                console.log('Model changed detected, processing...');
                 try {
                     // Check if model is available
+                    console.log('Checking model availability for:', selectedModel);
                     const checkResponse = await this.sendBackendRequest('/model/check', {
                         method: 'POST',
                         data: { model_name: selectedModel }
                     });
 
+                    console.log('Model check response:', checkResponse);
+
                     if (checkResponse && checkResponse.success) {
                         if (checkResponse.available) {
                             // Model is available, switch directly
+                            console.log('Model is available, switching directly...');
                             const switchResponse = await this.sendBackendRequest('/model/switch', {
                                 method: 'POST',
                                 data: { model_name: selectedModel }
                             });
+
+                            console.log('Model switch response:', switchResponse);
 
                             if (switchResponse && switchResponse.success) {
                                 // Update localStorage and electron store to reflect the successful model change
@@ -368,7 +395,8 @@ class SettingsManager {
                                 }
                                 this.showSuccessMessage(`Successfully switched to ${selectedModel}!`);
                             } else {
-                                throw new Error('Failed to switch model');
+                                console.error('Model switch failed:', switchResponse);
+                                throw new Error('Failed to switch model: ' + (switchResponse?.error || 'Unknown error'));
                             }
                         } else {
                             // Model needs to be downloaded

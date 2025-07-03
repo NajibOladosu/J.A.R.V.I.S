@@ -369,13 +369,18 @@ JARVIS:"""
     async def switch_model(self, model_name: str) -> bool:
         """Switch to a different model"""
         try:
+            logging.info(f"Attempting to switch to model: {model_name}")
+            
             if not self.is_model_available(model_name):
                 logging.error(f"Model {model_name} is not available locally")
                 return False
             
             if self.model_name == model_name and self.model_initialized:
-                logging.info(f"Already using model {model_name}")
-                return True
+                logging.info(f"Already using model {model_name}, but reinitializing to ensure it's loaded")
+                # Force reinitialize even if it's the "same" model
+                # This handles cases where the model might not actually be loaded
+                self.model = None
+                self.model_initialized = False
             
             logging.info(f"Switching from {self.model_name} to {model_name}")
             
@@ -384,21 +389,27 @@ JARVIS:"""
                 try:
                     # GPT4All doesn't have an explicit close method, but we can dereference
                     self.model = None
+                    logging.info("Previous model dereferenced")
                 except Exception as e:
                     logging.warning(f"Error closing previous model: {e}")
             
             # Update model name and reset initialization
+            old_model_name = self.model_name
             self.model_name = model_name
             self.model_initialized = False
             
-            # Initialize new model
-            await self.initialize()
+            logging.info(f"Model name updated from '{old_model_name}' to '{self.model_name}'")
             
-            if self.model_initialized:
-                logging.info(f"Successfully switched to model: {model_name}")
+            # Initialize new model
+            success = await self.initialize()
+            
+            if success and self.model_initialized:
+                logging.info(f"Successfully switched to and loaded model: {model_name}")
                 return True
             else:
                 logging.error(f"Failed to initialize new model: {model_name}")
+                # Revert model name if initialization failed
+                self.model_name = old_model_name if old_model_name else "orca-mini-3b-gguf2-q4_0.gguf"
                 return False
                 
         except Exception as e:
