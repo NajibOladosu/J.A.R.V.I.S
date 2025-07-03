@@ -337,6 +337,81 @@ async def get_current_model():
             "timestamp": datetime.now().isoformat()
         }
 
+# Voice input/output endpoints
+class VoiceListenRequest(BaseModel):
+    timeout: int = 5
+    phrase_timeout: int = 1
+
+class VoiceSpeakRequest(BaseModel):
+    text: str
+    blocking: bool = False
+
+@app.post("/voice/listen")
+async def voice_listen(request: VoiceListenRequest):
+    """Listen for voice input and convert to text"""
+    try:
+        result = await router.execute_action('listen', {
+            'timeout': request.timeout,
+            'phrase_timeout': request.phrase_timeout
+        })
+        
+        return {
+            "success": True,
+            "result": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error in voice listen endpoint: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/voice/speak")
+async def voice_speak(request: VoiceSpeakRequest):
+    """Convert text to speech"""
+    try:
+        result = await router.execute_action('speak', {
+            'text': request.text,
+            'blocking': request.blocking
+        })
+        
+        return {
+            "success": True,
+            "result": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error in voice speak endpoint: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/voice/info")
+async def get_voice_info():
+    """Get voice capabilities and available options"""
+    try:
+        result = await router.execute_action('get_voice_info', {})
+        
+        return {
+            "success": True,
+            "result": result,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting voice info: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time communication"""
@@ -367,10 +442,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         parsed_intent['params']
                     )
                 
+                ai_response_text = parsed_intent.get('response', 'I processed your request.')
+                
+                # Auto-speak AI responses if voice is enabled in settings
+                try:
+                    # For now, always try to speak (can be made configurable later)
+                    if ai_response_text:
+                        await router.execute_action('speak', {
+                            'text': ai_response_text,
+                            'blocking': False
+                        })
+                except Exception as e:
+                    logging.warning(f"Failed to speak AI response: {e}")
+                
                 response = {
                     "type": "chat_response",
                     "data": {
-                        "response": parsed_intent.get('response', 'I processed your request.'),
+                        "response": ai_response_text,
                         "action_executed": parsed_intent.get('action'),
                         "action_result": action_result,
                         "timestamp": datetime.now().isoformat()
