@@ -208,8 +208,9 @@ async def update_settings(request: dict):
         success = settings.update_from_frontend(request)
         
         if success:
-            # Reload LLM interface settings
-            await llm.reload_settings()
+            # If AI model changed, reload LLM interface
+            if 'jarvis-ai-model' in request:
+                await llm.reload_settings()
             
             return {
                 "success": True,
@@ -226,6 +227,44 @@ async def update_settings(request: dict):
             
     except Exception as e:
         logging.error(f"Error updating settings: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/settings/sync-frontend")
+async def sync_frontend_settings(request: dict):
+    """Sync frontend localStorage settings with backend"""
+    try:
+        logging.info(f"Syncing frontend settings: {request}")
+        
+        # Update backend settings from frontend localStorage
+        success = settings.update_from_frontend(request)
+        
+        if success:
+            # If AI model changed, switch to it if available
+            if 'jarvis-ai-model' in request:
+                new_model = request['jarvis-ai-model']
+                if llm.is_model_available(new_model):
+                    await llm.switch_model(new_model)
+                    logging.info(f"Switched to model from frontend settings: {new_model}")
+            
+            return {
+                "success": True,
+                "message": "Frontend settings synced successfully",
+                "settings": settings.settings,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to sync frontend settings",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logging.error(f"Error syncing frontend settings: {e}")
         return {
             "success": False,
             "error": str(e),
@@ -251,6 +290,168 @@ async def reload_settings():
         
     except Exception as e:
         logging.error(f"Error reloading settings: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+# Model Management Endpoints
+class ModelCheckRequest(BaseModel):
+    model_name: str
+
+class ModelDownloadRequest(BaseModel):
+    model_name: str
+
+class ModelSwitchRequest(BaseModel):
+    model_name: str
+
+@app.post("/model/check")
+async def check_model_availability(request: ModelCheckRequest):
+    """Check if a model is available locally"""
+    try:
+        available = llm.is_model_available(request.model_name)
+        current_model = llm.get_current_model()
+        
+        return {
+            "success": True,
+            "available": available,
+            "current_model": current_model,
+            "requested_model": request.model_name,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error checking model availability: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/model/download")
+async def download_model(request: ModelDownloadRequest):
+    """Start downloading a model (non-blocking)"""
+    try:
+        # Check if model is already available
+        if llm.is_model_available(request.model_name):
+            return {
+                "success": True,
+                "message": f"Model {request.model_name} is already available",
+                "status": "completed",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Start background download
+        success = await llm.download_model(request.model_name)
+        
+        if success:
+            return {
+                "success": True,
+                "message": f"Download started for model {request.model_name}",
+                "status": "downloading",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to start download for model {request.model_name}",
+                "status": "failed",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logging.error(f"Error starting model download: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "status": "failed",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/model/progress")
+async def get_download_progress():
+    """Get current download progress and status"""
+    try:
+        status = llm.get_download_status()
+        
+        return {
+            "success": True,
+            "progress": status["progress"],
+            "status": status["status"],
+            "model": status["model"],
+            "error": status["error"],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting download progress: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "progress": 0,
+            "status": "error",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/model/switch")
+async def switch_model(request: ModelSwitchRequest):
+    """Switch to a different model"""
+    try:
+        # First check if model is available
+        if not llm.is_model_available(request.model_name):
+            return {
+                "success": False,
+                "error": f"Model {request.model_name} is not available locally. Please download it first.",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        success = await llm.switch_model(request.model_name)
+        
+        if success:
+            # Update settings to reflect the new model
+            settings.settings['ai_model'] = request.model_name
+            settings.save_settings()
+            
+            logging.info(f"Model switched and settings updated: {request.model_name}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully switched to model {request.model_name}",
+                "current_model": llm.get_current_model(),
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Failed to switch to model {request.model_name}. Check logs for details.",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        logging.error(f"Error switching model: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/model/current")
+async def get_current_model():
+    """Get the name of the currently loaded model"""
+    try:
+        current_model = llm.get_current_model()
+        available_models = ["orca-mini-3b-gguf2-q4_0.gguf", "mistral-7b-instruct-v0.1.Q4_0.gguf", "nous-hermes-llama2-13b.q4_0.bin"]
+        
+        return {
+            "success": True,
+            "current_model": current_model,
+            "available_models": available_models,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.error(f"Error getting current model: {e}")
         return {
             "success": False,
             "error": str(e),

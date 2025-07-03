@@ -274,41 +274,97 @@ JARVIS:"""
             logging.error(f"Error checking model availability: {e}")
             return False
 
-    async def download_model(self, model_name: str) -> bool:
-        """Download a model if not available locally"""
+    def start_background_download(self, model_name: str) -> bool:
+        """Start a background download task"""
         try:
             if self.is_model_available(model_name):
                 logging.info(f"Model {model_name} is already available")
+                self._download_progress = 100
+                self._download_status = "completed"
                 return True
             
-            logging.info(f"Starting download of model: {model_name}")
+            logging.info(f"Starting background download of model: {model_name}")
             
-            # Reset download progress
+            # Reset download state
             self._download_progress = 0
+            self._download_status = "downloading"
+            self._download_error = None
+            self._downloading_model = model_name
             
-            def download_with_progress():
+            def download_worker():
                 try:
+                    logging.info(f"Download worker started for {model_name}")
+                    
+                    # Update progress incrementally for better UX
+                    self._download_progress = 10
+                    
                     # Create a temporary GPT4All instance to trigger download
+                    # This is where the actual download happens
                     temp_model = GPT4All(model_name, allow_download=True)
+                    
+                    # Mark as completed
                     self._download_progress = 100
+                    self._download_status = "completed"
+                    logging.info(f"Download completed for {model_name}")
                     return True
+                    
+                except FileNotFoundError as e:
+                    error_msg = f"Model file not found or invalid model name: {model_name}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+                except ConnectionError as e:
+                    error_msg = f"Network connection failed during download: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
+                except OSError as e:
+                    if "No space left on device" in str(e):
+                        error_msg = "Insufficient disk space for model download"
+                    else:
+                        error_msg = f"System error during download: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
+                    return False
                 except Exception as e:
-                    logging.error(f"Download failed: {e}")
+                    error_msg = f"Download failed for {model_name}: {str(e)}"
+                    logging.error(error_msg)
+                    self._download_status = "failed"
+                    self._download_error = error_msg
                     return False
             
-            # Run download in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(None, download_with_progress)
+            # Start download in a separate thread
+            import threading
+            download_thread = threading.Thread(target=download_worker, daemon=True)
+            download_thread.start()
             
-            return success
+            return True
             
         except Exception as e:
-            logging.error(f"Error downloading model: {e}")
+            logging.error(f"Error starting download: {e}")
+            self._download_status = "failed"
+            self._download_error = str(e)
             return False
+
+    async def download_model(self, model_name: str) -> bool:
+        """Start download and return immediately (non-blocking)"""
+        return self.start_background_download(model_name)
 
     def get_download_progress(self) -> float:
         """Get current download progress (0-100)"""
         return getattr(self, '_download_progress', 0)
+    
+    def get_download_status(self) -> dict:
+        """Get detailed download status"""
+        return {
+            "progress": getattr(self, '_download_progress', 0),
+            "status": getattr(self, '_download_status', "idle"),
+            "model": getattr(self, '_downloading_model', None),
+            "error": getattr(self, '_download_error', None)
+        }
 
     async def switch_model(self, model_name: str) -> bool:
         """Switch to a different model"""

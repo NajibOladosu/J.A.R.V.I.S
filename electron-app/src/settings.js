@@ -187,11 +187,11 @@ class SettingsManager {
 
         statusEl.style.display = 'block';
         progressEl.style.display = 'block';
-        statusTextEl.textContent = 'Downloading model...';
+        statusTextEl.textContent = 'Starting model download...';
         statusTextEl.className = 'status-text info';
 
         try {
-            // Start model download
+            // Start model download (non-blocking)
             const downloadResponse = await this.sendBackendRequest('/model/download', {
                 method: 'POST',
                 data: { model_name: modelName }
@@ -200,6 +200,8 @@ class SettingsManager {
             if (!downloadResponse || !downloadResponse.success) {
                 throw new Error(downloadResponse?.error || 'Failed to start download');
             }
+
+            statusTextEl.textContent = 'Downloading model... This may take several minutes.';
 
             // Poll for download progress
             const pollInterval = setInterval(async () => {
@@ -210,10 +212,12 @@ class SettingsManager {
 
                     if (progressResponse && progressResponse.success) {
                         const progress = progressResponse.progress || 0;
+                        const status = progressResponse.status || 'downloading';
+                        
                         progressFillEl.style.width = `${progress}%`;
                         progressTextEl.textContent = `${Math.round(progress)}%`;
 
-                        if (progress >= 100) {
+                        if (status === 'completed' || progress >= 100) {
                             clearInterval(pollInterval);
                             
                             // Switch to the new model
@@ -227,6 +231,15 @@ class SettingsManager {
                                 statusTextEl.textContent = 'Model loaded successfully!';
                                 statusTextEl.className = 'status-text success';
                                 
+                                // Update localStorage and electron store to reflect the successful model change
+                                localStorage.setItem('jarvis-ai-model', modelName);
+                                // Also save to electron store through IPC
+                                try {
+                                    await ipcRenderer.invoke('save-settings', { 'jarvis-ai-model': modelName });
+                                } catch (err) {
+                                    console.error('Failed to save model to electron store:', err);
+                                }
+                                
                                 // Hide progress after success
                                 setTimeout(() => {
                                     progressEl.style.display = 'none';
@@ -234,15 +247,21 @@ class SettingsManager {
                                 
                                 return true;
                             } else {
-                                throw new Error('Failed to switch model');
+                                throw new Error('Failed to switch model: ' + (switchResponse?.error || 'Unknown error'));
                             }
+                        } else if (status === 'failed') {
+                            clearInterval(pollInterval);
+                            throw new Error(progressResponse.error || 'Download failed');
                         }
+                    } else {
+                        // If we can't get progress, just continue polling
+                        console.warn('Unable to get download progress, continuing...');
                     }
                 } catch (error) {
                     clearInterval(pollInterval);
                     throw error;
                 }
-            }, 1000);
+            }, 2000); // Poll every 2 seconds instead of 1 second
 
             return true;
 
@@ -339,6 +358,14 @@ class SettingsManager {
                             });
 
                             if (switchResponse && switchResponse.success) {
+                                // Update localStorage and electron store to reflect the successful model change
+                                localStorage.setItem('jarvis-ai-model', selectedModel);
+                                // Also save to electron store through IPC
+                                try {
+                                    await ipcRenderer.invoke('save-settings', { 'jarvis-ai-model': selectedModel });
+                                } catch (err) {
+                                    console.error('Failed to save model to electron store:', err);
+                                }
                                 this.showSuccessMessage(`Successfully switched to ${selectedModel}!`);
                             } else {
                                 throw new Error('Failed to switch model');

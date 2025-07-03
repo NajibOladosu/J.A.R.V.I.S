@@ -245,12 +245,65 @@ async function startPythonBackend() {
     }
 }
 
+async function syncSettingsWithBackend() {
+    try {
+        console.log('Syncing frontend settings with backend...');
+        
+        // Get all frontend settings from localStorage (simulated since we're in main process)
+        const settingsData = {
+            'jarvis-ai-model': store.get('jarvis-ai-model', 'orca-mini-3b-gguf2-q4_0.gguf'),
+            'jarvis-voice-enabled': store.get('jarvis-voice-enabled', true),
+            'jarvis-auto-start': store.get('jarvis-auto-start', false),
+            'jarvis-backend-port': store.get('jarvis-backend-port', '8000'),
+            'jarvis-theme': store.get('jarvis-theme', 'dark')
+        };
+        
+        console.log('Frontend settings to sync:', settingsData);
+        
+        // Send sync request to backend
+        const url = `http://127.0.0.1:${currentPort}/settings/sync-frontend`;
+        console.log(`Syncing settings with: ${url}`);
+        
+        // Get fetch implementation
+        let fetch;
+        if (typeof globalThis.fetch !== 'undefined') {
+            fetch = globalThis.fetch;
+        } else {
+            try {
+                const nodeFetch = await import('node-fetch');
+                fetch = nodeFetch.default || nodeFetch;
+            } catch (importError) {
+                console.error('No fetch implementation available for settings sync');
+                return;
+            }
+        }
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(settingsData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Settings synced successfully:', result.message);
+        } else {
+            console.error('Failed to sync settings:', response.statusText);
+        }
+        
+    } catch (error) {
+        console.error('Error syncing settings with backend:', error);
+    }
+}
+
 function connectWebSocket() {
     try {
         console.log(`Connecting to WebSocket on port ${currentPort}...`);
         ws = new WebSocket(`ws://127.0.0.1:${currentPort}/ws`);
 
-        ws.on('open', () => {
+        ws.on('open', async () => {
             console.log('WebSocket connected to Python backend');
             if (mainWindow) {
                 mainWindow.webContents.send('backend-status', {
@@ -259,6 +312,9 @@ function connectWebSocket() {
                     port: currentPort
                 });
             }
+            
+            // Sync frontend settings with backend on connection
+            await syncSettingsWithBackend();
         });
 
         ws.on('message', (data) => {
@@ -398,13 +454,23 @@ function setupIPC() {
             const url = `http://127.0.0.1:${currentPort}${request.url}`;
             console.log(`Making request to: ${url}`);
             
+            // Set timeout based on request type - longer for downloads
+            const isDownloadRequest = request.url.includes('/model/download');
+            const timeoutMs = isDownloadRequest ? 120000 : 30000; // 2 minutes for downloads, 30s for others
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            
             const response = await fetch(url, {
                 method: request.method || 'GET',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: request.data ? JSON.stringify(request.data) : undefined
+                body: request.data ? JSON.stringify(request.data) : undefined,
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
