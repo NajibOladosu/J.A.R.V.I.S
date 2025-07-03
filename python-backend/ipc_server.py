@@ -475,8 +475,8 @@ async def get_current_model():
 
 # Voice input/output endpoints
 class VoiceListenRequest(BaseModel):
-    timeout: int = 5
-    phrase_timeout: int = 1
+    timeout: int = 15
+    phrase_timeout: int = None  # No limit - let natural pauses determine end
 
 class VoiceSpeakRequest(BaseModel):
     text: str

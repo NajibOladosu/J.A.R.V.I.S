@@ -71,9 +71,17 @@ class VoiceTasks:
             return
         
         try:
-            # Initial ambient noise adjustment will be done per-request
-            # to avoid context manager conflicts
-            logging.info("Microphone initialized successfully")
+            # Configure recognizer settings for better speech detection
+            self.recognizer.energy_threshold = 300  # Lower for better sensitivity
+            self.recognizer.dynamic_energy_threshold = True  # Automatically adjust
+            self.recognizer.pause_threshold = 1.0  # Seconds of silence before considering phrase complete
+            self.recognizer.phrase_threshold = 0.3  # Minimum seconds of speaking audio before phrase
+            self.recognizer.non_speaking_duration = 0.8  # Seconds of silence to consider phrase complete
+            
+            logging.info("Microphone configured with optimized settings")
+            logging.info(f"Energy threshold: {self.recognizer.energy_threshold}")
+            logging.info(f"Pause threshold: {self.recognizer.pause_threshold}")
+            logging.info(f"Dynamic energy adjustment: {self.recognizer.dynamic_energy_threshold}")
             
         except Exception as e:
             logging.error(f"Error setting up microphone: {e}")
@@ -126,7 +134,7 @@ class VoiceTasks:
                 "message": f"Failed to speak text: {str(e)}"
             }
     
-    async def listen(self, timeout: int = 5, phrase_timeout: int = 1) -> Dict[str, Any]:
+    async def listen(self, timeout: int = 10, phrase_timeout: int = None) -> Dict[str, Any]:
         """Listen for speech input and convert to text"""
         try:
             if not self.microphone:
@@ -149,18 +157,21 @@ class VoiceTasks:
                     # Acquire lock to prevent concurrent access
                     with self._microphone_lock:
                         with self.microphone as source:
-                            # Quick ambient noise adjustment
+                            # Enhanced ambient noise adjustment
                             logging.info("Adjusting for ambient noise...")
-                            self.recognizer.adjust_for_ambient_noise(source, duration=1.0)
+                            self.recognizer.adjust_for_ambient_noise(source, duration=2.0)
                             
-                            # Listen for speech
-                            logging.info(f"Listening for speech (timeout: {timeout}s, phrase_limit: {phrase_timeout}s)...")
-                            logging.info(f"Microphone energy threshold: {self.recognizer.energy_threshold}")
+                            # Log current settings
+                            logging.info(f"Listening for speech (timeout: {timeout}s)...")
+                            logging.info(f"Energy threshold: {self.recognizer.energy_threshold}")
+                            logging.info(f"Pause threshold: {self.recognizer.pause_threshold}")
                             
+                            # Listen for speech with improved settings
+                            # No phrase_time_limit allows longer phrases
                             audio = self.recognizer.listen(
                                 source, 
-                                timeout=timeout, 
-                                phrase_time_limit=phrase_timeout
+                                timeout=timeout,
+                                phrase_time_limit=phrase_timeout  # None allows unlimited phrase length
                             )
                             
                             logging.info("Audio captured successfully")
@@ -266,4 +277,88 @@ class VoiceTasks:
             return {
                 "success": False,
                 "message": f"Failed to get voice info: {str(e)}"
+            }
+    
+    async def calibrate_microphone(self, duration: float = 3.0) -> Dict[str, Any]:
+        """Calibrate microphone settings for current environment"""
+        try:
+            if not self.microphone:
+                return {
+                    "success": False,
+                    "message": "Microphone not available"
+                }
+            
+            with self._microphone_lock:
+                with self.microphone as source:
+                    logging.info(f"Calibrating microphone for {duration} seconds...")
+                    
+                    # Extended ambient noise adjustment
+                    self.recognizer.adjust_for_ambient_noise(source, duration=duration)
+                    
+                    # Log new settings
+                    new_threshold = self.recognizer.energy_threshold
+                    logging.info(f"Calibration complete. New energy threshold: {new_threshold}")
+            
+            return {
+                "success": True,
+                "message": "Microphone calibrated successfully",
+                "energy_threshold": new_threshold,
+                "calibration_duration": duration
+            }
+            
+        except Exception as e:
+            logging.error(f"Error calibrating microphone: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to calibrate microphone: {str(e)}"
+            }
+    
+    async def adjust_sensitivity(self, sensitivity: str = "medium") -> Dict[str, Any]:
+        """Adjust microphone sensitivity (low, medium, high)"""
+        try:
+            sensitivity_settings = {
+                "low": {
+                    "energy_threshold": 4000,
+                    "pause_threshold": 1.5,
+                    "phrase_threshold": 0.5
+                },
+                "medium": {
+                    "energy_threshold": 300,
+                    "pause_threshold": 1.0,
+                    "phrase_threshold": 0.3
+                },
+                "high": {
+                    "energy_threshold": 100,
+                    "pause_threshold": 0.8,
+                    "phrase_threshold": 0.2
+                }
+            }
+            
+            if sensitivity not in sensitivity_settings:
+                return {
+                    "success": False,
+                    "message": f"Invalid sensitivity level. Choose from: {list(sensitivity_settings.keys())}"
+                }
+            
+            settings = sensitivity_settings[sensitivity]
+            
+            # Apply settings
+            self.recognizer.energy_threshold = settings["energy_threshold"]
+            self.recognizer.pause_threshold = settings["pause_threshold"]
+            self.recognizer.phrase_threshold = settings["phrase_threshold"]
+            
+            logging.info(f"Sensitivity adjusted to '{sensitivity}'")
+            logging.info(f"Energy threshold: {self.recognizer.energy_threshold}")
+            
+            return {
+                "success": True,
+                "message": f"Sensitivity adjusted to '{sensitivity}'",
+                "settings": settings
+            }
+            
+        except Exception as e:
+            logging.error(f"Error adjusting sensitivity: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to adjust sensitivity: {str(e)}"
             }

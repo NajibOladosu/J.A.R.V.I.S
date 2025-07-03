@@ -29,7 +29,9 @@ class TaskRouter:
             
             'speak': self.voice_tasks.speak,
             'listen': self.voice_tasks.listen,
-            'get_voice_info': self.voice_tasks.get_voice_info
+            'get_voice_info': self.voice_tasks.get_voice_info,
+            'calibrate_microphone': self.voice_tasks.calibrate_microphone,
+            'adjust_sensitivity': self.voice_tasks.adjust_sensitivity
         }
     
     async def execute_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,7 +89,9 @@ class TaskRouter:
             
             'speak': 'Convert text to speech',
             'listen': 'Listen for speech input and convert to text',
-            'get_voice_info': 'Get information about available voices and audio devices'
+            'get_voice_info': 'Get information about available voices and audio devices',
+            'calibrate_microphone': 'Calibrate microphone for current environment',
+            'adjust_sensitivity': 'Adjust microphone sensitivity (low, medium, high)'
         }
         
         return {
