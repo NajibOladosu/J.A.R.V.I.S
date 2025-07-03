@@ -379,7 +379,7 @@ async function sendToPython(message) {
         // Set up response handler with timeout
         const timeout = setTimeout(() => {
             reject(new Error('Request timeout'));
-        }, 30000);
+        }, 60000); // Increased to 60 seconds
 
         const responseHandler = (data) => {
             try {

@@ -10,6 +10,7 @@ class VoiceTasks:
     def __init__(self):
         # Initialize TTS engine
         self._microphone_lock = threading.Lock()
+        self._tts_lock = threading.Lock()
         self._last_listen_time = 0
         self.tts_engine = None
         try:
@@ -87,8 +88,19 @@ class VoiceTasks:
                 }
             
             def speak_sync():
-                self.tts_engine.say(text)
-                self.tts_engine.runAndWait()
+                with self._tts_lock:
+                    try:
+                        self.tts_engine.say(text)
+                        self.tts_engine.runAndWait()
+                    except RuntimeError as e:
+                        if "run loop already started" in str(e):
+                            # Try alternative approach without runAndWait
+                            logging.warning("TTS run loop conflict, using alternative method")
+                            self.tts_engine.say(text)
+                            # Give time for speech to complete
+                            time.sleep(len(text) * 0.1)
+                        else:
+                            raise e
             
             if blocking:
                 # Run synchronously
